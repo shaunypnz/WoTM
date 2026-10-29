@@ -1,0 +1,13 @@
+// War of the Monsters (SCUS-97197) - quick play for the native build (owner 2026-10-23: "all levels unlocked,
+// skip the cinematic, straight into the game"). Addresses from the ELF's own symbols (docs/syms.txt in the WoTM repo).
+// uiMain__Fi 0x1d96b4: the delay slot that passes "keep playing" (s2 ^ 1, s2 = Start pressed) to
+// updateMpegMovieDecoding__Fb becomes "move a0,zero" - every movie starts and is skipped on the next frame through the
+// game's own Start-to-skip path (abort, flush, endDisplay, termAll). Returning early from playMpegMovie* instead left
+// the display uninitialised; movieEnable=0 hung the boot (playMovie__Fv never advances nextMovie).
+patch=1,EE,001d96b4,word,00002021
+// levelUnlocked__Fi (0x1a63f0): return 1 - every arena selectable
+patch=1,EE,001a63f0,word,03e00008
+patch=1,EE,001a63f4,word,24020001
+// MonsterIsLocked__5Shelli (0x1ab0f0): return 0 - every monster selectable
+patch=1,EE,001ab0f0,word,03e00008
+patch=1,EE,001ab0f4,word,00001021
