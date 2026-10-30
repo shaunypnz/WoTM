@@ -6,23 +6,22 @@ A native port of **War of the Monsters** (PS2, 2003), built from the statically 
 
 > **Untested preview.** This fork is published as work in progress. It has only been run on one Linux machine with a software renderer. Speed on a real graphics card, adventure mode, saves and game pads are unverified. Use it at your own risk.
 
-**This is a Linux-only fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp). Credit for the game work belongs there, and Windows players should use [their release](https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest). We don't build or test Windows here.
+**This is a Linux-only fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp). Credit for the game work belongs there.
 
 **What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. Planned: 8-player online play over WebRTC, and a Vulkan renderer. New upstream releases get merged in, with our changes on top.
 
 **Where this fork came from:** we were separately building our own Linux port of the game. When we found this project, it was further along, so we moved our work here. That original engine and its history are in [`legacy/`](legacy/README.md).
 
 ## Play
-1. unzip
-2. open `wotm.exe` 
-3. select ISO file
+1. Build it from your own disc: `tools/linux/build.sh --iso <your.iso> --dir ~/Games/WotM`
+2. Run `~/Games/WotM/play.sh`
 
-More details in the README file ([tools/release/README.txt](tools/release/README.txt)).
+The game starts in a 1280x720 window (F11 for fullscreen). Ctrl+Q closes it. If RustDesk runs on the machine, the mouse isn't captured for the camera, so a remote session keeps its pointer; F10 toggles that.
 
-Found a bug in the Windows release? Open an [issue upstream](https://github.com/yanm1103/War_of_the_Monsters_recomp/issues) and attach `wotm.log` (along your save files).
+Found a bug? Open an [issue](https://github.com/shaunypnz/WoTM/issues) and attach `wotm.log` (along with your save files).
 
 ## Mods
-PNG Textures, skins and custom monsters go in the `mods\` folder next to `wotm.exe`. The release ships with Goliath Prime and Cerebulon as playable custom monsters (these are just for fun, don't open issues if they can't jump or can't do any other specific actions!).
+PNG Textures, skins and custom monsters go in the `mods/` folder next to `wotm`. The build ships with Goliath Prime and Cerebulon as playable custom monsters (these are just for fun, don't open issues if they can't jump or can't do any other specific actions!).
 
 To make your own mods, check the reference: [docs/guides/MODS.md](docs/guides/MODS.md).
 
@@ -32,19 +31,12 @@ To make your own mods, check the reference: [docs/guides/MODS.md](docs/guides/MO
 
 Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [docs/ANALYSIS.md](docs/ANALYSIS.md). File formats: [docs/FORMATS.md](docs/FORMATS.md).
 
-## Building the port (Windows)
-1. Clone with submodules (`git clone --recurse-submodules`).
-2. Put your ISO in `ISO/` and run `powershell -ExecutionPolicy Bypass -File tools\setup_runtime.ps1`. It extracts the disc, sets up PS2Recomp in `runtime/`, generates the recompiled code and runs the first build. Needs git, Python 3, CMake 3.24+ and MSVC 14.40+ (VS 2022 17.10+ or Build Tools).
-3. `build_runtime.bat` rebuilds after changes; `run_live.bat -Auto 0` runs the game.
-
-Runtime details, environment variables and the release package: [docs/guides/RUNTIME.md](docs/guides/RUNTIME.md) and [docs/guides/NATIVE.md](docs/guides/NATIVE.md).
-
 ## Building the port (Linux)
-`tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` does the same from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work as on Windows.
+`tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` builds from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work.
 
 Picture filters at the window output: `WOTM_FXAA=1` (edge smoothing) and `WOTM_SHARPEN=0..1` (contrast-adaptive sharpening, after AMD's CAS). Both are off by default.
 
-## Building the decompilation (WSL/Ubuntu)
+## Building the decompilation (Ubuntu)
 ```sh
 sudo dpkg --add-architecture i386 && sudo apt update
 sudo apt install binutils-mips-linux-gnu ninja-build python3-venv wine wine32:i386

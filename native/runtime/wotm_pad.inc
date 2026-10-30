@@ -256,11 +256,38 @@ inline int keyboardPlayer()
 }
 
 // Mouse na camera moderna (wotm_mouse.hpp), a cada apresentacao na thread da janela: cursor preso enquanto a orbita do jogador do
-// teclado dirige (aviso da thread do EE) e a janela tem o foco; preso, o deslocamento vai para a orbita. WOTM_MOUSECAM=0 desliga.
+// teclado dirige (aviso da thread do EE) e a janela tem o foco; preso, o deslocamento vai para a orbita. WOTM_MOUSECAM=0 desliga e
+// =1 liga; sem a variavel, desliga se o RustDesk roda nesta maquina: o cursor preso nao anda pelo controle remoto e a sessao fica
+// sem mouse. F10 alterna durante o jogo.
+static bool rustdeskRunning()
+{
+    std::error_code ec;
+    for (const auto &e : std::filesystem::directory_iterator("/proc", ec))
+    {
+        std::ifstream f(e.path() / "comm");
+        std::string name;
+        if (f && std::getline(f, name) && name.rfind("rustdesk", 0) == 0)
+            return true;
+    }
+    return false;
+}
 static void mouseFrame()
 {
     namespace ms = wotm::mouse;
-    static const bool off = [] { const char *e = std::getenv("WOTM_MOUSECAM"); return e && e[0] == '0'; }();
+    static bool off = [] {
+        const char *e = std::getenv("WOTM_MOUSECAM");
+        if (e && *e)
+            return e[0] == '0';
+        const bool remote = rustdeskRunning();
+        if (remote)
+            std::fprintf(stderr, "[mouse] RustDesk nesta maquina: cursor nao fica preso (F10 alterna)\n");
+        return remote;
+    }();
+    if (IsKeyPressed(KEY_F10))
+    {
+        off = !off;
+        std::fprintf(stderr, "[mouse] F10: camera pelo mouse %s\n", off ? "desligada" : "ligada");
+    }
     ms::g_kbPlayer.store(keyboardPlayer(), std::memory_order_relaxed);
     const bool want = !off && ms::wanted() && !ms::inGameMenu() && IsWindowFocused();   // menu do jogo na fase (pausa, "salvar?"): solto
     static bool captured = false;

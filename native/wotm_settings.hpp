@@ -77,7 +77,7 @@ inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1,
 // (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
 // monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
 struct FirstRun { Key key; int value; };
-inline constexpr FirstRun kFirstRun[] = {{Display, 1}, {LockToggle, 1}, {EnemyBars, 1}, {Announcer, 2}};
+inline constexpr FirstRun kFirstRun[] = {{Display, 0}, {Res, 720}, {LockToggle, 1}, {EnemyBars, 1}, {Announcer, 2}};
 inline std::atomic<bool> g_resFromMonitor{false};
 inline std::filesystem::path g_path;   // vazio: sem arquivo (WOTM_SETTINGS=0 ou antes do load)
 inline std::mutex g_fileMutex;
@@ -470,10 +470,7 @@ inline void load(const std::filesystem::path &dir)
                      fromFile, fromEnv, firstRun ? "; primeira execucao: padroes de jogador" : "");
         if (firstRun)
         {
-            if (!std::getenv(kEnv[Res]))
-                g_resFromMonitor.store(true);   // grava o arquivo quando a janela souber o monitor
-            else
-                save();
+            save();   // Linux: comeca em janela de 720 linhas; F11 ou o painel VIDEO mudam
         }
         else if (g_pathPending)
             save();

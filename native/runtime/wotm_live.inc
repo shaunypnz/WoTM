@@ -648,6 +648,13 @@ static void applyVideoSettings()
 // ser a do ultimo tipo usado (sem borda ou exclusiva).
 static void fullscreenKey()
 {
+    // Ctrl+Q fecha o jogo: por controle remoto o Alt+F4 pode ficar com a maquina de quem acessa
+    if (!g_localCollect && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q))
+    {
+        std::fprintf(stderr, "[native] Ctrl+Q: fechando\n");
+        std::fflush(stderr);
+        std::_Exit(0);
+    }
     if (!g_localCollect && !g_hideFps && IsKeyPressed(KEY_F11))
     {
         namespace st = wotm::settings;
