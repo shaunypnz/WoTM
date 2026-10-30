@@ -1,5 +1,7 @@
 Linux preview of [War of the Monsters Recompiled](https://github.com/yanm1103/War_of_the_Monsters_recomp), the native port by Yan Moura and contributors. This fork adds a Linux build. Almost all of the game work is theirs.
 
+**Early release:** see "Not verified yet" below.
+
 **This is source only.** You build it on your own machine from your own US disc image (SCUS-97197). No game data or game code is included or downloaded.
 
 ## Install
