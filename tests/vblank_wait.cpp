@@ -76,7 +76,7 @@ void wait_once(Result &out) {
 
 int main() {
     using namespace ps2;
-    // The skip is opt-in (PS2_SKIP_VBLANK_WAIT=1); start this boot with it off so the unskipped wait is measured first, and
+    // The skip is on by default (PS2_SKIP_VBLANK_WAIT=0 turns it off); start this boot with it off so the unskipped wait is measured first, and
     // switch it on between frames, which is where a frame's poll hook is chosen.
     setenv("PS2_SKIP_VBLANK_WAIT", "0", 1);
     g_options.pal = false;

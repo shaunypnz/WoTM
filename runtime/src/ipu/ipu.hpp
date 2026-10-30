@@ -17,5 +17,7 @@ void write_fifo(const std::uint8_t *qword);
 void read_fifo(std::uint8_t *qword);
 void dma_started(int channel);
 void stats();
+// Macroblocks decoded since boot: a count that moves while a movie plays.
+std::uint64_t macroblocks();
 
 }

@@ -342,7 +342,10 @@ std::uint32_t fout(float f) {
 
 float norm(float f) { return fin(fout(f)); }
 
-void fast_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) {
+// exact: the arithmetic of upper() itself (fp::add/sub/mul, the PS2's rounding) instead of host floats. VU0 runs
+// game logic, where a 1-ulp difference changes the game: it keeps the decode cache but not the host-float shortcut.
+template <bool exact>
+void decoded_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) {
     o.target = -1;
     o.has_clip = false;
     if (d.kind == kNop) return;
@@ -366,11 +369,23 @@ void fast_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) {
         for (int i = 0; i < 4; ++i) if (d.dest & (8u >> i)) o.value.w[i] = fp::from_fixed(s.sw[i], d.frac);
         return;
     case kOpmula:
+        if constexpr (exact) {
+            o.value.w[0] = fp::mul(s.w[1], t.w[2]);
+            o.value.w[1] = fp::mul(s.w[2], t.w[0]);
+            o.value.w[2] = fp::mul(s.w[0], t.w[1]);
+            return;
+        }
         o.value.w[0] = fout(norm(fin(s.w[1]) * fin(t.w[2])));
         o.value.w[1] = fout(norm(fin(s.w[2]) * fin(t.w[0])));
         o.value.w[2] = fout(norm(fin(s.w[0]) * fin(t.w[1])));
         return;
     case kOpmsub:
+        if constexpr (exact) {
+            o.value.w[0] = fp::sub(r.acc.w[0], fp::mul(s.w[1], t.w[2]));
+            o.value.w[1] = fp::sub(r.acc.w[1], fp::mul(s.w[2], t.w[0]));
+            o.value.w[2] = fp::sub(r.acc.w[2], fp::mul(s.w[0], t.w[1]));
+            return;
+        }
         o.value.w[0] = fout(fin(r.acc.w[0]) - norm(fin(s.w[1]) * fin(t.w[2])));
         o.value.w[1] = fout(fin(r.acc.w[1]) - norm(fin(s.w[2]) * fin(t.w[0])));
         o.value.w[2] = fout(fin(r.acc.w[2]) - norm(fin(s.w[0]) * fin(t.w[1])));
@@ -384,6 +399,16 @@ void fast_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) {
     case kQ: for (int i = 0; i < 4; ++i) b[i] = r.q; break;
     case kI: for (int i = 0; i < 4; ++i) b[i] = r.i; break;
     }
+    if constexpr (exact) {
+        switch (d.kind) {
+        case kAdd: for (int i = 0; i < 4; ++i) o.value.w[i] = fp::add(s.w[i], b[i]); return;
+        case kSub: for (int i = 0; i < 4; ++i) o.value.w[i] = fp::sub(s.w[i], b[i]); return;
+        case kMul: for (int i = 0; i < 4; ++i) o.value.w[i] = fp::mul(s.w[i], b[i]); return;
+        case kMadd: for (int i = 0; i < 4; ++i) o.value.w[i] = fp::add(r.acc.w[i], fp::mul(s.w[i], b[i])); return;
+        case kMsub: for (int i = 0; i < 4; ++i) o.value.w[i] = fp::sub(r.acc.w[i], fp::mul(s.w[i], b[i])); return;
+        default: break;
+        }
+    }
     switch (d.kind) {
     case kAdd: for (int i = 0; i < 4; ++i) o.value.w[i] = fout(fin(s.w[i]) + fin(b[i])); break;
     case kSub: for (int i = 0; i < 4; ++i) o.value.w[i] = fout(fin(s.w[i]) - fin(b[i])); break;
@@ -395,6 +420,9 @@ void fast_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) {
     default: break;
     }
 }
+
+void fast_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) { decoded_upper<false>(r, d, o); }
+void exact_upper(Vu0Regs &r, const Decoded &d, UpperOut &o) { decoded_upper<true>(r, d, o); }
 
 void scan_flags(int unit, const std::uint8_t *code, std::uint32_t size) {
     bool used = false;
@@ -988,7 +1016,8 @@ void run_fast(int n, std::uint32_t address) {
     Unit u = unit_of(n);
     Vu0Regs &r = *u.regs;
     if (g_scan[n]) scan_flags(n, u.code, u.code_mask + 1);
-    const bool flags = g_flags_used[n];
+    // VU0's MAC/status/clip flags are also read by the EE (CFC2) after the micro-program ends, so VU0 always keeps them.
+    const bool flags = n == 0 || g_flags_used[n];
     Decoded *cache = g_decoded[n];
     vuops::FlagPipe pipe;
     pipe.start(r);
@@ -1015,7 +1044,8 @@ void run_fast(int n, std::uint32_t address) {
         npc = (npc + 8u) & u.code_mask;
         ++pipe.t;
         read_q(u, pipe, r, current, hi);
-        fast_upper(r, d, out);
+        if (n == 0) exact_upper(r, d, out);
+        else fast_upper(r, d, out);
         std::uint16_t was[16];
         view.snapshot(r, was);
         view.arm(u);
@@ -1063,6 +1093,13 @@ void run(int n, std::uint32_t address) {
         interpret(n, address);
         return;
     }
+    // VU0 micro-programs (VCALLMS, VIF0 MSCAL) have no compiled form: the decode-cached loop runs them with the
+    // reference's own arithmetic (exact_upper), so the results match this loop bit for bit at less cost per step.
+    // PS2_VU_EXACT keeps the per-step decoding loop below as the reference.
+    if (!exact) {
+        run_fast(n, address);
+        return;
+    }
     Unit u = unit_of(n);
     Vu0Regs &r = *u.regs;
     vuops::FlagPipe pipe;
@@ -1081,6 +1118,24 @@ void run(int n, std::uint32_t address) {
         ++pipe.t;
         read_q(u, pipe, r, current, hi);
         UpperOut out = upper(r, hi);
+        // PS2_VU_CHECK_UPPER (with PS2_VU_EXACT): the decoded upper op the fast loop runs must give this step's result
+        static const bool check_upper = std::getenv("PS2_VU_CHECK_UPPER") != nullptr;
+        if (check_upper) {
+            static int reported = 0;
+            Vu0Regs copy = r;
+            UpperOut fast;
+            if (n == 0) exact_upper(copy, decode_upper(lo, hi), fast);
+            else fast_upper(copy, decode_upper(lo, hi), fast);
+            const bool same = fast.target == out.target && (out.target < 0 || (fast.dest == out.dest && fast.flags == out.flags &&
+                              [&] { for (int i = 0; i < 4; ++i) if ((out.dest & (8u >> i)) && fast.value.w[i] != out.value.w[i]) return false; return true; }())) && fast.has_clip == out.has_clip &&
+                              (!out.has_clip || fast.clip == out.clip);
+            if (!same && reported < 40) {
+                ++reported;
+                std::fprintf(stderr, "[vu%d] upper mismatch pc %04X hi %08X target %d/%d dest %u/%u flags %d/%d clip %d:%08X/%d:%08X value %08X %08X %08X %08X / %08X %08X %08X %08X\n",
+                             n, pc, hi, out.target, fast.target, out.dest, fast.dest, out.flags, fast.flags, out.has_clip, out.clip, fast.has_clip, fast.clip,
+                             out.value.w[0], out.value.w[1], out.value.w[2], out.value.w[3], fast.value.w[0], fast.value.w[1], fast.value.w[2], fast.value.w[3]);
+            }
+        }
         bool branch = false;
         std::uint16_t was[16];
         view.snapshot(r, was);

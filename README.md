@@ -74,8 +74,8 @@ reaches the 16:9 title screen; a single-player fight holds about 60 fps in our t
 autosave writes the game state and the next launch resumes from it. The PS2 edition saves settings to a new memory card
 and reads them back after a restart; `--warm-up` records and compiles the vector unit programs of a fight without a
 window; the Vulkan-only renderer, the picture filters, 4x resolution and the Xbox 360 prompts run on the same card.
-Not yet verified: a 30-minute session, two-player fights end to end, and physical game pads. Heavy scenes can still
-drop below 60 fps, and fight audio can clip at full volume.
+Not yet verified: a 30-minute session, two-player fights end to end, and physical game pads. The fight route holds about
+60 fps on that card with the game window on a virtual display. Fight audio can clip at full volume.
 
 Logs are in the game folder's `logs/`; include the newest one when you report a problem.
 

@@ -186,10 +186,15 @@ std::uint32_t poll_note(std::uint32_t a) {
     return v;
 }
 
-// PS2_SKIP_VBLANK_WAIT=1 turns the VBlank wait skip on. It is off by default: with it on, the PS2 edition's intro
-// movies stop reaching the screen (3600 frames presented 180 times, 6 uploads instead of ~1700, on the RX 570),
-// and in the threaded mode the game runs in a fight holds 59.5-60.3 fps with or without it.
-bool g_wait_skip = false;
+// The VBlank wait skip is on by default (PS2_SKIP_VBLANK_WAIT=0 turns it off), but never while a movie plays: with it
+// armed during the PS2 edition's intro movies they stopped reaching the screen (3600 frames presented 180 times, 6
+// uploads instead of ~1700, on the RX 570). A frame only skips once the IPU has decoded nothing for kMovieQuiet
+// frames. In a fight the wait is a few hundred thousand INTC_STAT reads a frame, and skipping it took the EE thread
+// from 14.4-16.4 to 12.6-13.0 host ms per frame on the RX 570 machine (threaded, 2x).
+bool g_wait_skip = true;
+constexpr std::uint32_t kMovieQuiet = 120;
+std::uint32_t g_movie_quiet = kMovieQuiet;
+std::uint64_t g_last_macroblocks = 0;
 // Armed at the start of a frame's emulation, off again after the first skip: at most one wait per guest frame
 // is skipped, because a second wait waits for something the first jump cannot know about.
 bool g_wait_armed = false;
@@ -227,7 +232,14 @@ std::uint32_t wait_ld32(std::uint32_t a) {
 // frame_begins(), so a poll that is not being counted costs one pointer test.
 void frame_begins() {
     poll_window();
-    g_wait_armed = g_wait_skip;
+    const std::uint64_t macroblocks = ipu::macroblocks();
+    if (macroblocks != g_last_macroblocks) {
+        g_last_macroblocks = macroblocks;
+        g_movie_quiet = 0;
+    } else if (g_movie_quiet < kMovieQuiet) {
+        ++g_movie_quiet;
+    }
+    g_wait_armed = g_wait_skip && g_movie_quiet >= kMovieQuiet;
     if (g_wait_skip && !g_poll_hook) g_poll_hook = wait_ld32;
 }
 
@@ -235,8 +247,10 @@ void set_wait_skip(bool on) { g_wait_skip = on; }
 
 void reset() {
     g_intc_stat = g_intc_mask = g_intc_latched = g_dmac_stat = 0;
-    static const bool skip_wanted = [] { const char *v = std::getenv("PS2_SKIP_VBLANK_WAIT"); return v && *v == '1'; }();
+    static const bool skip_wanted = [] { const char *v = std::getenv("PS2_SKIP_VBLANK_WAIT"); return !v || *v != '0'; }();
     g_wait_skip = skip_wanted;
+    g_movie_quiet = kMovieQuiet;
+    g_last_macroblocks = ipu::macroblocks();
     g_wait_armed = false;
     g_poll_hook = nullptr;
     gs::reset();

@@ -116,6 +116,8 @@ std::uint16_t g_th0 = 0, g_th1 = 0;
 std::int16_t g_dc[3];
 std::uint64_t g_commands[16], g_stalls = 0, g_out_qwords = 0, g_macroblocks = 0;
 
+std::uint64_t macroblocks_decoded() { return g_macroblocks; }
+
 bool pull() {
     std::uint8_t q[16];
     if (!dmac::ipu_pull(q)) return false;
@@ -729,5 +731,7 @@ void state(ps2::state::Stream &s) {
     s.pod(g_th1);
     s.pod(g_dc);
 }
+
+std::uint64_t macroblocks() { return macroblocks_decoded(); }
 
 }
