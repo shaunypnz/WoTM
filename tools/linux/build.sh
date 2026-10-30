@@ -79,10 +79,11 @@ cp -f "$WORK/game.elf" "$DIR/SCUS_971.97"   # the game runs this copy; it is you
 cp -rf "$REPO/mods" "$DIR/"
 cat > "$DIR/play.sh" <<PLAY
 #!/bin/sh
-# Starts the game; settings and saves stay in this folder. Pass KEY=VALUE options through the environment.
+# Starts the game; settings, saves and wotm.log stay in this folder. Pass KEY=VALUE options through the environment.
 cd "\$(dirname "\$0")"
 export PS2X_CD_IMAGE="\${PS2X_CD_IMAGE:-$ISO}"
-exec ./wotm "\$@"
+[ -f wotm.log ] && mv -f wotm.log wotm.prev.log
+exec ./wotm "\$@" > wotm.log 2>&1
 PLAY
 chmod +x "$DIR/play.sh"
 echo "Done: $DIR/play.sh"
