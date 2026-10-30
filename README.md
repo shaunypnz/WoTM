@@ -4,11 +4,11 @@
 
 A native port of **War of the Monsters** (PS2, 2003), built from the statically recompiled game code and easy to mod.
 
-> **Untested preview.** This fork is published as work in progress. It has only been run on one Linux machine with a software renderer. Speed on a real graphics card, adventure mode, saves and game pads are unverified. Use it at your own risk.
+> **Preview.** This fork is lightly tested: it has been played on one Linux machine with an AMD RX 570 and an Xbox 360 controller. Long sessions, adventure mode and saves are still unverified, and frame rate hasn't been measured. Use it at your own risk.
 
 **This is a Linux-only fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp). Credit for the game work belongs there.
 
-**What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. Planned: 8-player online play over WebRTC, and a Vulkan renderer. New upstream releases get merged in, with our changes on top.
+**What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. The fork maintains the Linux side: new upstream releases get merged in, with our changes on top. A Vulkan renderer is planned.
 
 **Where this fork came from:** we were separately building our own Linux port of the game. When we found this project, it was further along, so we moved our work here. That original engine and its history are in [`legacy/`](legacy/README.md).
 
