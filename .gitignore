@@ -51,3 +51,4 @@ tools/pcsx2_auto/*.bin
 
 # pasta do runtime criada pelo tools/setup_runtime.ps1 (clone do PS2Recomp, build, discroot)
 /runtime/
+/third_party/wgpu-native/
