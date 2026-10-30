@@ -1,0 +1,32 @@
+/games/
+*.iso
+*.chd
+*.cso
+*.zip
+*.7z
+*.rar
+
+/generated/
+/tools/
+/build/
+/build-*/
+/task-runs/
+
+*.ppm
+*.wav
+__pycache__/
+
+/third_party/wgpu-native/
+
+# scratch run artifacts: RAM dumps and the disc ELF copy stay out of git (no game data in the repo)
+scratch/**/*.bin
+scratch/local/SCUS_971.97
+
+# everything under scratch/ is local scratch: gate logs, frame dumps and RAM snapshots carry
+# absolute paths and the ELF copy - none of it belongs in git
+/scratch/
+/gateRun.pid
+/internal/out/
+/internal/dist/
+/internal/.public-checkout/
+/internal/release-*/

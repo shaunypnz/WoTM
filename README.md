@@ -4,13 +4,13 @@
 
 A native port of **War of the Monsters** (PS2, 2003), built from the statically recompiled game code and easy to mod.
 
-**This is a Linux-focused fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp): go there for the Windows release and to report Windows bugs. Credit for the game work belongs there.
+> **Untested preview.** This fork is published as work in progress. It has only been run on one Linux machine with a software renderer. Speed on a real graphics card, adventure mode, saves and game pads are unverified. Use it at your own risk.
 
-**What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. Linux status: fights run in a window, including 4-player, on the software renderer; speed on a real GPU, adventure mode, saves and game pads are still being tested. A Vulkan renderer is planned next.
+**This is a Linux-only fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp). Credit for the game work belongs there, and Windows players should use [their release](https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest). We don't build or test Windows here.
 
-**Where this fork came from:** we were separately building our own Linux port of the game on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). When we found this project, it was further along, so we moved our work here and are carrying over what it didn't already have.
+**What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. Planned: 8-player online play over WebRTC, and a Vulkan renderer. New upstream releases get merged in, with our changes on top.
 
-Windows players: [grab the upstream release](https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest).
+**Where this fork came from:** we were separately building our own Linux port of the game. When we found this project, it was further along, so we moved our work here. That original engine and its history are in [`legacy/`](legacy/README.md).
 
 ## Play
 1. unzip
