@@ -6,6 +6,8 @@
 // PS2X_FMV so avisa.
 #if __has_include("wotm_fmv.hpp") && __has_include(<libavcodec/avcodec.h>)
 #include "wotm_fmv.hpp"
+#include "wotm_post.hpp"
+#include "wotm_res.hpp"
 #include "wotm_syms.h"   // wotm::sym / wotm::fn: enderecos do ELF por nome (tools/native_syms.py --gen)
 #define WOTM_HAVE_FMV 1
 namespace wotm_fmv_hooks
@@ -150,7 +152,7 @@ inline double now() { return std::chrono::duration<double>(std::chrono::steady_c
 inline Font font()
 {
     static Font f = [] {
-        Font r = LoadFontEx("C:/Windows/Fonts/consola.ttf", 40, nullptr, 0);
+        Font r = LoadFontEx(wotm::res::monoFontPath(), 40, nullptr, 0);
         if (r.texture.id == 0)
             return GetFontDefault();
         SetTextureFilter(r.texture, TEXTURE_FILTER_BILINEAR);
@@ -281,9 +283,16 @@ extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da c
 #include "wotm_trainview.inc"   // modo treino: volumes, esferas dos golpes, painel de dano e numeros do HUD
 #define WOTM_HAVE_NATIVE 1
 
+#ifndef _WIN32
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 namespace wotm_live
 {
 // Diagnostico de queda: sem windows.h (conflita com o raylib), espelha so o que o filtro precisa.
+#ifdef _WIN32
 struct ExcRecord
 {
     unsigned long code, flags;
@@ -299,11 +308,14 @@ struct ExcPointers
 };
 extern "C" __declspec(dllimport) void *__stdcall SetUnhandledExceptionFilter(long(__stdcall *)(ExcPointers *));
 extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
+#endif
 inline const char *g_stage = "idle";   // etapa da camada nativa em andamento (para localizar a queda)
 } // namespace wotm_live
 void wotmCrashTrace(void *exceptionContext);   // wotm_standalone.cpp
+void wotmHostProfWatchThisThread();
 namespace wotm_live
 {
+#ifdef _WIN32
 inline long __stdcall crashFilter(ExcPointers *e)
 {
     const char *base = static_cast<const char *>(GetModuleHandleA(nullptr));
@@ -321,6 +333,26 @@ inline long __stdcall crashFilter(ExcPointers *e)
     }
     return 0; // EXCEPTION_CONTINUE_SEARCH
 }
+#else
+// Linux: mesma linha [CRASH] e a pilha por backtrace (nomes so com simbolos no binario); depois morre com o sinal original
+inline void crashSignal(int sig, siginfo_t *info, void *)
+{
+    std::fprintf(stderr, "[CRASH] sinal=%d endereco=%p stage=%s\n", sig, info->si_addr, g_stage);
+    std::fflush(stderr);
+    void *frames[64];
+    backtrace_symbols_fd(frames, backtrace(frames, 64), 2);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+inline void installCrashHandler()
+{
+    struct sigaction sa{};
+    sa.sa_sigaction = crashSignal;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    for (int s : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT})
+        sigaction(s, &sa, nullptr);
+}
+#endif
 struct State
 {
     wotm::Scene scene;
@@ -468,6 +500,7 @@ static bool inFullscreen()
 // Capture) congela na ultima imagem composta e a antiga (BitBlt) fica preta. 1 = tira o WS_POPUP (fica WS_OVERLAPPED sem moldura, como
 // no relato do Processing/JOGL); 2 = isso e a janela 1 px mais alta que o monitor (o driver so promove a janela que cobre o monitor
 // exato; a linha a mais fica fora da tela); 0 = como o raylib deixa. Sem windows.h (conflita com o raylib).
+#ifdef _WIN32
 extern "C" __declspec(dllimport) long long __stdcall GetWindowLongPtrW(void *hwnd, int index);
 extern "C" __declspec(dllimport) long long __stdcall SetWindowLongPtrW(void *hwnd, int index, long long value);
 extern "C" __declspec(dllimport) int __stdcall SetWindowPos(void *hwnd, void *after, int x, int y, int cx, int cy, unsigned flags);
@@ -495,6 +528,10 @@ static void captureFriendlyBorderless()
                  static_cast<unsigned long long>(style), static_cast<unsigned long long>(style & ~kWsPopup), mode >= 2 ? ", +1 px de altura" : "",
                  mode);
 }
+
+#else
+static void captureFriendlyBorderless() {}   // so o driver do Windows promove a janela
+#endif
 
 // Tela cheia no monitor da janela (proporcao do monitor; com WOTM_ASPECT fixo o quadro fica com faixas) ou de volta a janela.
 static void setFullscreen(bool on)
@@ -550,8 +587,7 @@ static void initWindowAspect()
     // PS2X_HOSTPROF_WIN=1 (com PS2X_HOSTPROF): o amostrador vigia esta thread (a da janela) em vez da do EE
     if (std::getenv("PS2X_HOSTPROF") && std::getenv("PS2X_HOSTPROF_WIN"))
     {
-        void wotmHostProfWatchThisThread();
-        wotmHostProfWatchThisThread();
+        ::wotmHostProfWatchThisThread();
     }
     if (!g_localCollect && !g_hideFps)   // replay (--vu1cmp): sem janela de verdade, fica como esta
         initPresentRate();
@@ -1460,7 +1496,11 @@ static bool wotmDrawNative(const uint8_t *rdram)
     if (!filterInstalled)
     {
         filterInstalled = true;
+#ifdef _WIN32
         wotm_live::SetUnhandledExceptionFilter(wotm_live::crashFilter);
+#else
+        wotm_live::installCrashHandler();
+#endif
     }
     const wotm::Ram ram{rdram, PS2_RAM_SIZE};
     // Carga da fase (g_loadFreeze): repete o ultimo quadro desenhado (S.rts[S.cur], intocado) com o fade do Shell::FadeScreen por cima,
@@ -2174,7 +2214,10 @@ static bool wotmDrawNative(const uint8_t *rdram)
     // BLEND_ALPHA sobre o preto a cena saia escurecida pelo alfa, e os quadrados aditivos (halo dos power-ups) viravam retangulos claros.
     rlSetBlendFactors(RL_ONE, RL_ZERO, RL_FUNC_ADD);
     BeginBlendMode(BLEND_CUSTOM);
+    const bool postFilter = wotm::post::g_filter.begin(static_cast<float>(RW), static_cast<float>(RH));
     DrawTexturePro(S.rts[S.cur].texture, src, dst, Vector2{0.f, 0.f}, 0.f, WHITE);
+    if (postFilter)
+        wotm::post::g_filter.end();
     EndBlendMode();
 
     {   // contador de FPS (desligado ao abrir; F3 liga/desliga): "jogo" = quadros do jogo por segundo (g_frame, 0x6F7E38); "tela" = desenhos nativos por segundo

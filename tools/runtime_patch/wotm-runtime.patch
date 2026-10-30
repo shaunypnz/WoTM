@@ -197,10 +197,20 @@ index 0000000..0947e18
 +    }
 +}
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..650398d 100644
+index 589d768..818b945 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
-@@ -393,6 +393,7 @@ add_library(ps2_runtime STATIC
+@@ -1,6 +1,9 @@
+ cmake_minimum_required(VERSION 3.20)
+ 
+ project(PS2Runtime VERSION 0.1.0 LANGUAGES CXX)
++if(NOT MSVC)
++    add_compile_options(-mavx2 -mbmi2 -mlzcnt -mpopcnt)   # mesmo conjunto do /arch:AVX2
++endif()
+ 
+ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+@@ -393,6 +396,7 @@ add_library(ps2_runtime STATIC
      src/lib/vu/ps2_vu1_core.cpp
      src/lib/vu/ps2_vu1_upper.cpp
      src/lib/vu/ps2_vu1_lower.cpp
@@ -208,7 +218,7 @@ index 589d768..650398d 100644
      src/lib/games_database.cpp
  )
  
-@@ -432,13 +433,26 @@ target_compile_definitions(ps2_runtime PRIVATE
+@@ -432,13 +436,26 @@ target_compile_definitions(ps2_runtime PRIVATE
  file(GLOB_RECURSE KERNEL_SRC_FILES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel/*.cpp"
  )
@@ -236,7 +246,7 @@ index 589d768..650398d 100644
  )
  
  set(RUNNER_MAIN_CPP "${CMAKE_CURRENT_SOURCE_DIR}/src/runner/main.cpp")
-@@ -456,14 +470,27 @@ if(PS2X_IS_ANDROID)
+@@ -456,14 +473,27 @@ if(PS2X_IS_ANDROID)
      )
  
      target_link_options(ps2EntryRunner PRIVATE "-Wl,--undefined=ANativeActivity_onCreate")
@@ -266,7 +276,7 @@ index 589d768..650398d 100644
          UNITY_BUILD ON
          UNITY_BUILD_BATCH_SIZE "${PS2X_RUNNER_UNITY_BUILD_BATCH_SIZE}"
      )
-@@ -476,8 +503,8 @@ if(PS2X_ENABLE_RUNNER_PCH)
+@@ -476,8 +506,8 @@ if(PS2X_ENABLE_RUNNER_PCH)
      )
  
      foreach(PS2X_RUNNER_GENERATED_HEADER IN ITEMS
@@ -277,7 +287,7 @@ index 589d768..650398d 100644
          if(EXISTS "${PS2X_RUNNER_GENERATED_HEADER}")
              list(APPEND PS2X_RUNNER_PCH_HEADERS "${PS2X_RUNNER_GENERATED_HEADER}")
          endif()
-@@ -488,7 +515,7 @@ if(PS2X_ENABLE_RUNNER_PCH)
+@@ -488,7 +518,7 @@ if(PS2X_ENABLE_RUNNER_PCH)
          "${CMAKE_CURRENT_SOURCE_DIR}/include/ps2_stubs.h"
      )
  
@@ -286,7 +296,7 @@ index 589d768..650398d 100644
  endif()
  
  if(PS2X_DEFAULT_BOOT_ELF_DEFINE)
-@@ -499,6 +526,7 @@ endif()
+@@ -499,6 +529,7 @@ endif()
  
  if(MSVC)
      target_compile_options(ps2EntryRunner PRIVATE /FS)
@@ -294,7 +304,7 @@ index 589d768..650398d 100644
  endif()
  
  target_include_directories(ps2_runtime PUBLIC
-@@ -506,6 +534,12 @@ target_include_directories(ps2_runtime PUBLIC
+@@ -506,6 +537,12 @@ target_include_directories(ps2_runtime PUBLIC
      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel
  )
  
@@ -307,7 +317,7 @@ index 589d768..650398d 100644
  target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ffmpeg ps2_iop)
  target_link_libraries(ps2EntryRunner
      PRIVATE
-@@ -557,6 +591,9 @@ endif()
+@@ -557,6 +594,9 @@ endif()
  if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
      EnableFastReleaseMode(ps2_runtime)
      EnableFastReleaseMode(ps2EntryRunner)
@@ -317,7 +327,7 @@ index 589d768..650398d 100644
  
      if(WIN32 AND NOT PS2X_SHOW_WINDOWS_CONSOLE)
          if(MSVC)
-@@ -608,3 +645,91 @@ endif()
+@@ -608,3 +648,106 @@ endif()
  install(DIRECTORY include/
      DESTINATION include
  )
@@ -330,7 +340,22 @@ index 589d768..650398d 100644
 +if(NOT WOTM_NATIVE_DIR)
 +    message(FATAL_ERROR "WOTM_NATIVE_DIR nao definido: aponte para a pasta native/ do repo WoTM (-DWOTM_NATIVE_DIR=<repo>/native)")
 +endif()
-+target_include_directories(ps2_runtime PRIVATE "${WOTM_NATIVE_DIR}" "${WOTM_NATIVE_DIR}/runtime" "${CMAKE_BINARY_DIR}/wotm_gen")
++target_include_directories(ps2_runtime PRIVATE "${WOTM_NATIVE_DIR}" "${WOTM_NATIVE_DIR}/runtime" "${CMAKE_BINARY_DIR}/wotm_gen"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/lib")
++if(NOT WIN32)
++    # wotm.rc nao existe aqui: os mesmos arquivos viram arrays C (native/wotm_res.hpp)
++    set(WOTM_ASSETS_INC "")
++    foreach(WOTM_ASSET IN ITEMS "kAssetPrompts=prompts.png" "kAssetOswald=Oswald-Medium.ttf")
++        string(REPLACE "=" ";" WOTM_ASSET "${WOTM_ASSET}")
++        list(GET WOTM_ASSET 0 WOTM_ASSET_NAME)
++        list(GET WOTM_ASSET 1 WOTM_ASSET_FILE)
++        file(READ "${WOTM_NATIVE_DIR}/assets/${WOTM_ASSET_FILE}" WOTM_ASSET_HEX HEX)
++        string(REGEX REPLACE "(..)" "0x\\1," WOTM_ASSET_HEX "${WOTM_ASSET_HEX}")
++        string(APPEND WOTM_ASSETS_INC "inline const unsigned char ${WOTM_ASSET_NAME}[] = {${WOTM_ASSET_HEX}};\n")
++    endforeach()
++    file(WRITE "${CMAKE_BINARY_DIR}/wotm_gen/wotm_assets.inc" "${WOTM_ASSETS_INC}")
++    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${WOTM_NATIVE_DIR}/assets/prompts.png" "${WOTM_NATIVE_DIR}/assets/Oswald-Medium.ttf")
++endif()
 +# main.cpp instala hooks por nome (wotm_syms.h; no runtime cobaia, o wotm_syms_nm.h de wotm_gen troca os enderecos pelos do ELF nmall)
 +target_include_directories(ps2EntryRunner PRIVATE "${WOTM_NATIVE_DIR}" "${CMAKE_BINARY_DIR}/wotm_gen")
 +# icone do executavel (e da janela: o recurso se chama GLFW_ICON)

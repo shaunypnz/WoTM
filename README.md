@@ -33,6 +33,11 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [doc
 
 Runtime details, environment variables and the release package: [docs/guides/RUNTIME.md](docs/guides/RUNTIME.md) and [docs/guides/NATIVE.md](docs/guides/NATIVE.md).
 
+## Building the port (Linux)
+`tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` does the same from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work as on Windows.
+
+Picture filters at the window output: `WOTM_FXAA=1` (edge smoothing) and `WOTM_SHARPEN=0..1` (contrast-adaptive sharpening, after AMD's CAS). Both are off by default.
+
 ## Building the decompilation (WSL/Ubuntu)
 ```sh
 sudo dpkg --add-architecture i386 && sudo apt update

@@ -2629,11 +2629,8 @@ static const Font &uiFont()
     if (!g_uiFontTried)
     {
         g_uiFontTried = true;
-        void *mod = GetModuleHandleA(nullptr);
-        void *res = FindResourceA(mod, "FONT_OSWALD", reinterpret_cast<const char *>(static_cast<uintptr_t>(10)));   // RT_RCDATA
-        void *h = res ? LoadResource(mod, res) : nullptr;
-        const unsigned char *data = h ? static_cast<const unsigned char *>(LockResource(h)) : nullptr;
-        const int size = res ? static_cast<int>(SizeofResource(mod, res)) : 0;
+        int size = 0;
+        const unsigned char *data = wotm::res::find("FONT_OSWALD", size);
         if (data && size > 0)
             g_uiFont = LoadFontFromMemory(".ttf", data, size, 128, nullptr, 0);
         if (g_uiFont.texture.id)

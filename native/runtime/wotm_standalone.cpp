@@ -19,6 +19,13 @@
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "dbghelp.lib")
+#else
+#include <limits.h>
+#include <unistd.h>
+enum { MB_OK = 0, MB_OKCANCEL = 1, MB_ICONERROR = 0x10, MB_ICONINFORMATION = 0x40, IDOK = 1 };
+#define _stricmp strcasecmp
+#define _fseeki64 fseeko
+#include <strings.h>
 #endif
 #include <cstdint>
 #include <cstdio>
@@ -86,7 +93,7 @@ int box(const std::wstring &msg, unsigned flags)
     return MessageBoxW(nullptr, msg.c_str(), kTitle, flags);
 #else
     (void)flags;
-    return 0;
+    return IDOK;   // sem caixa: a mensagem foi para o stderr e a pergunta segue (pickIso)
 #endif
 }
 
@@ -97,6 +104,11 @@ fs::path exeDir()
     const DWORD n = GetModuleFileNameW(nullptr, buf, 4096);
     if (n > 0 && n < 4096)
         return fs::path(buf).parent_path();
+#else
+    std::error_code link;
+    const fs::path self = fs::read_symlink("/proc/self/exe", link);
+    if (!link)
+        return self.parent_path();
 #endif
     std::error_code ec;
     return fs::current_path(ec);
@@ -282,7 +294,37 @@ fs::path pickIso(const fs::path &startDir)
     if (GetOpenFileNameW(&ofn))
         return fs::path(file);
 #else
+    // zenity ou kdialog, se houver; senao pergunta no terminal
     (void)startDir;
+    for (const char *cmd : {"zenity --file-selection --title='Select your War of the Monsters disc image' --file-filter='*.iso' 2>/dev/null",
+                            "kdialog --getopenfilename . '*.iso' 2>/dev/null"})
+        if (FILE *p = popen(cmd, "r"))
+        {
+            char line[4096] = "";
+            const bool got = std::fgets(line, sizeof line, p) != nullptr;
+            pclose(p);
+            if (got)
+            {
+                std::string s(line);
+                while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+                    s.pop_back();
+                if (!s.empty())
+                    return fs::path(s);
+            }
+        }
+    if (isatty(0))
+    {
+        std::fprintf(stderr, "Path of the .iso: ");
+        char line[4096] = "";
+        if (std::fgets(line, sizeof line, stdin))
+        {
+            std::string s(line);
+            while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+                s.pop_back();
+            if (!s.empty())
+                return fs::path(s);
+        }
+    }
 #endif
     return {};
 }
@@ -404,6 +446,7 @@ std::filesystem::path wotmStandalonePrepare()
     fs::path data = game;
     if (!writable(game))
     {
+#ifdef _WIN32
         const char *local = std::getenv("LOCALAPPDATA");
         if (!local || !*local)
         {
@@ -411,6 +454,11 @@ std::filesystem::path wotmStandalonePrepare()
             return {};
         }
         data = fs::path(local) / "WotM";
+#else
+        const char *xdg = std::getenv("XDG_DATA_HOME");
+        const char *home = std::getenv("HOME");
+        data = (xdg && *xdg) ? fs::path(xdg) / "WotM" : fs::path(home ? home : ".") / ".local/share/WotM";
+#endif
         fs::create_directories(data, ec);
         if (!writable(data))
         {
