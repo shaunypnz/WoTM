@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 
 extern const char kGsShader[];
 extern const char kBlitShader[];
+extern const char kPostShader[];
 
 namespace ps2::gs {
 void swizzle_tables(std::vector<std::uint32_t> &out);
@@ -51,6 +53,33 @@ std::uint32_t g_surface_width = 0, g_surface_height = 0;
 WGPURenderPipeline g_blit = nullptr;
 WGPUBindGroup g_blit_group = nullptr;
 WGPUBuffer g_blit_params = nullptr;
+// The optional post pass (post.wgsl): the blit draws the frame at the window's size into g_post_image, then FXAA
+// and/or sharpening draw that into the window. Off: the blit draws straight into the window as before.
+WGPURenderPipeline g_post = nullptr;
+WGPUBindGroupLayout g_post_layout = nullptr;
+WGPUBindGroup g_post_group = nullptr;
+WGPUBuffer g_post_params = nullptr;
+WGPUSampler g_post_sampler = nullptr;
+WGPUTexture g_post_image = nullptr;
+WGPUTextureView g_post_view = nullptr;
+std::uint32_t g_post_width = 0, g_post_height = 0;
+PostFilter g_filter{};
+std::atomic<std::uint32_t> g_filter_cycles{0};
+std::uint32_t g_filter_seen = 0;
+
+// F9's presets, in order; the one after the current filter is next (a custom PS2_SHARPEN counts as the closest).
+void apply_filter_cycles() {
+    const std::uint32_t cycles = g_filter_cycles.load(std::memory_order_relaxed);
+    if (cycles == g_filter_seen) return;
+    static constexpr PostFilter kPresets[4] = {{false, 0.0f}, {true, 0.0f}, {true, 0.4f}, {false, 0.4f}};
+    int at = 0;
+    for (int i = 0; i < 4; ++i)
+        if (kPresets[i].fxaa == g_filter.fxaa && (kPresets[i].sharpen > 0.0f) == (g_filter.sharpen > 0.0f)) at = i;
+    g_filter = kPresets[(at + static_cast<int>(cycles - g_filter_seen)) % 4];
+    g_filter_seen = cycles;
+    std::fprintf(stderr, "[video] %s\n", describe(g_filter).c_str());
+}
+float g_view_x = 0.0f, g_view_y = 0.0f, g_view_w = 1.0f, g_view_h = 1.0f;
 std::uint32_t g_field = 0, g_last_width = 0, g_last_height = 0;
 bool g_have_previous = false;
 std::uint32_t g_scale = 1, g_copy_words = 1u << 20, g_field_words = 1u << 19;
@@ -121,6 +150,8 @@ struct Image {
     bool active = false;
     std::uint32_t dbp = 0, dbw = 0, dpsm = 0, dsax = 0, dsay = 0, rrw = 0, total = 0, done = 0, bpp = 32, lead_bits = 0, id = 0;
     std::vector<std::uint8_t> pending;
+    bool hold = false;                      // a candidate for prompt replacement: collected whole before queueing
+    std::vector<std::uint8_t> held;
 } g_image;
 std::uint32_t g_image_ids = 0;
 
@@ -895,24 +926,31 @@ void submit(WGPUTextureView present_view = nullptr) {
         wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, 16);
     }
     if (present_view) {
-        WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-        color.view = present_view;
-        color.loadOp = WGPULoadOp_Clear;
-        color.storeOp = WGPUStoreOp_Store;
-        color.clearValue = WGPUColor{0.0, 0.0, 0.0, 1.0};
-        WGPURenderPassDescriptor rd = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-        rd.colorAttachmentCount = 1;
-        rd.colorAttachments = &color;
-        WGPURenderPassEncoder rp = wgpuCommandEncoderBeginRenderPass(enc, &rd);
-        const float w = static_cast<float>(g_surface_width), h = static_cast<float>(g_surface_height);
-        const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
-        const float vw = std::min(w, h * aspect), vh = vw / aspect;
-        wgpuRenderPassEncoderSetViewport(rp, (w - vw) * 0.5f, (h - vh) * 0.5f, vw, vh, 0.0f, 1.0f);
-        wgpuRenderPassEncoderSetPipeline(rp, g_blit);
-        wgpuRenderPassEncoderSetBindGroup(rp, 0, g_blit_group, 0, nullptr);
-        wgpuRenderPassEncoderDraw(rp, 3, 1, 0, 0);
-        wgpuRenderPassEncoderEnd(rp);
-        wgpuRenderPassEncoderRelease(rp);
+        const bool post = g_post && g_post_view && (g_filter.fxaa || g_filter.sharpen > 0.0f);
+        const auto pass = [&](WGPUTextureView view, WGPURenderPipeline pipeline, WGPUBindGroup group, bool full) {
+            WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            color.view = view;
+            color.loadOp = WGPULoadOp_Clear;
+            color.storeOp = WGPUStoreOp_Store;
+            color.clearValue = WGPUColor{0.0, 0.0, 0.0, 1.0};
+            WGPURenderPassDescriptor rd = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            rd.colorAttachmentCount = 1;
+            rd.colorAttachments = &color;
+            WGPURenderPassEncoder rp = wgpuCommandEncoderBeginRenderPass(enc, &rd);
+            if (full) wgpuRenderPassEncoderSetViewport(rp, 0.0f, 0.0f, static_cast<float>(g_post_width), static_cast<float>(g_post_height), 0.0f, 1.0f);
+            else wgpuRenderPassEncoderSetViewport(rp, g_view_x, g_view_y, g_view_w, g_view_h, 0.0f, 1.0f);
+            wgpuRenderPassEncoderSetPipeline(rp, pipeline);
+            wgpuRenderPassEncoderSetBindGroup(rp, 0, group, 0, nullptr);
+            wgpuRenderPassEncoderDraw(rp, 3, 1, 0, 0);
+            wgpuRenderPassEncoderEnd(rp);
+            wgpuRenderPassEncoderRelease(rp);
+        };
+        if (post) {
+            pass(g_post_view, g_blit, g_blit_group, true);
+            pass(present_view, g_post, g_post_group, false);
+        } else {
+            pass(present_view, g_blit, g_blit_group, false);
+        }
     }
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
     wgpuQueueSubmit(g_queue, 1, &cmd);
@@ -1104,7 +1142,12 @@ bool init(Mode m) {
 #else
     WGPUInstanceExtras extras = {};
     extras.chain.sType = static_cast<WGPUSType>(WGPUSType_InstanceExtras);
+#if defined(__linux__)
+    // Linux renders through Vulkan only: no GL fallback, whose output differs and runs far slower.
+    extras.backends = WGPUInstanceBackend_Vulkan;
+#else
     extras.backends = WGPUInstanceBackend_Primary;
+#endif
     WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
     id.nextInChain = &extras.chain;
     g_instance = wgpuCreateInstance(&id);
@@ -1126,12 +1169,20 @@ bool init(Mode m) {
     wgpuInstanceRequestAdapter(g_instance, &options, acb);
     while (!adapter_done) pump();
     if (!adapter) {
+#if defined(__linux__)
+        std::fprintf(stderr, "[gpu] no Vulkan GPU found: install your GPU's Vulkan driver (mesa-vulkan-drivers for AMD and Intel, "
+                             "the NVIDIA driver's Vulkan ICD for NVIDIA) and check `vulkaninfo --summary`; VK_ICD_FILENAMES in "
+                             "local.env picks one when there are several\n");
+#else
         std::fprintf(stderr, "[gpu] no adapter\n");
+#endif
         return false;
     }
     WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
     if (wgpuAdapterGetInfo(adapter, &info) == WGPUStatus_Success) {
-        std::fprintf(stderr, "[gpu] %.*s (%.*s)\n", static_cast<int>(info.device.length), info.device.data, static_cast<int>(info.description.length), info.description.data);
+        const char *backend = info.backendType == WGPUBackendType_Vulkan ? "Vulkan" : info.backendType == WGPUBackendType_Metal ? "Metal"
+                              : info.backendType == WGPUBackendType_D3D12 ? "D3D12" : info.backendType == WGPUBackendType_WebGPU ? "WebGPU" : "other";
+        std::fprintf(stderr, "[gpu] %.*s (%.*s) %s\n", static_cast<int>(info.device.length), info.device.data, static_cast<int>(info.description.length), info.description.data, backend);
         wgpuAdapterInfoFreeMembers(info);
     }
     WGPULimits supported = WGPU_LIMITS_INIT;
@@ -1173,7 +1224,10 @@ bool init(Mode m) {
             g_profile_to = z;
         }
     }
-    if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, 3u);
+    if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, kMaxScale);
+    if (const char *aa = std::getenv("PS2_AA")) g_filter.fxaa = std::strcmp(aa, "fxaa") == 0 || std::strcmp(aa, "1") == 0;
+    if (const char *sharpen = std::getenv("PS2_SHARPEN")) g_filter.sharpen = std::clamp(static_cast<float>(std::atof(sharpen)), 0.0f, 1.0f);
+    std::fprintf(stderr, "[video] internal resolution %ux, %s\n", g_scale, describe(g_filter).c_str());
     g_copy_words = (1u << 20) * g_scale * g_scale;
     g_tiles_per_row = (2048 * static_cast<int>(g_scale) + 15) / 16;
     g_tile_count.assign(static_cast<std::size_t>(g_tiles_per_row) * g_tiles_per_row, 0);
@@ -1426,8 +1480,105 @@ void draw(const State &st, const Vertex *v, int count) {
     if (b.prims.size() >= kPrimWords * 65536) emit_all();
 }
 
+// PS2_TRACE_UPLOAD=<dir>: every distinct host-to-VRAM image is written once as
+// <dir>/<fnv64>_<psm>_<w>x<h>_<dbp>_<dbw>_<x>_<y>.bin (its raw transfer bytes) - for finding HUD textures by content.
+struct UploadTrace {
+    const char *dir = std::getenv("PS2_TRACE_UPLOAD");
+    std::vector<std::uint8_t> bytes;
+    std::uint32_t psm = 0, w = 0, h = 0, dbp = 0, dbw = 0, x = 0, y = 0;
+    std::unordered_map<std::uint64_t, bool> seen;
+    void finish() {
+        if (!dir || bytes.empty()) return;
+        std::uint64_t hash = 0xCBF29CE484222325ull;
+        for (std::uint8_t b : bytes) hash = (hash ^ b) * 0x100000001B3ull;
+        if (!seen.emplace(hash, true).second) { bytes.clear(); return; }
+        char name[160];
+        std::snprintf(name, sizeof name, "%s/%016llX_%02X_%ux%u_%u_%u_%u_%u.bin", dir, static_cast<unsigned long long>(hash), psm, w, h, dbp, dbw, x, y);
+        if (FILE *f = std::fopen(name, "wb")) {
+            std::fwrite(bytes.data(), 1, bytes.size(), f);
+            std::fclose(f);
+        }
+        bytes.clear();
+    }
+} g_upload_trace;
+
+// PS2_PROMPTS=x360: War of the Monsters' button sheet (a 64x64 8-bit texture, four glyphs in a 2x2 grid stored
+// upside down: circle, square / triangle, cross) is redrawn as Xbox 360 letters when the game uploads it, in the
+// colours of its own palette: Cross -> green A, Circle -> red B, Square -> blue X, Triangle -> Y. The texture is
+// recognised by the hash of its bytes; nothing of it is stored here, and it is rewritten from the player's own copy.
+constexpr std::uint64_t kWotmButtonSheet = 0x10180CF44151DF97ull;
+
+std::uint64_t fnv64(const std::uint8_t *data, std::size_t n) {
+    std::uint64_t hash = 0xCBF29CE484222325ull;
+    for (std::size_t i = 0; i < n; ++i) hash = (hash ^ data[i]) * 0x100000001B3ull;
+    return hash;
+}
+
+bool prompts_x360() {
+    static const bool on = [] { const char *v = std::getenv("PS2_PROMPTS"); return v && std::strcmp(v, "x360") == 0; }();
+    return on;
+}
+
+void redraw_button_sheet(std::uint8_t *px) {
+    // 5x7 letters, drawn 3x into each 32x32 cell
+    static const char *const kLetters[4][7] = {
+        {".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"},   // A
+        {"####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."},   // B
+        {"#...#", "#...#", ".#.#.", "..#..", ".#.#.", "#...#", "#...#"},   // X
+        {"#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."},   // Y
+    };
+    constexpr int kCircle = 0, kSquare = 1, kTriangle = 2, kCross = 3;   // cells in memory order
+    const auto cell_px = [&](int cell, int x, int y) -> std::uint8_t & { return px[((cell >> 1) * 32 + y) * 64 + (cell & 1) * 32 + x]; };
+    // The glyph's own pixels use the coloured palette entries; the disc behind it the dark ones below 0x22. A letter
+    // pixel takes the index of the nearest stroke-interior pixel of the glyph it borrows its colour from, so the
+    // borrowed glyph's real colour and shading carry over without reading the palette.
+    std::uint8_t source[4][32][32];
+    for (int cell = 0; cell < 4; ++cell)
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 32; ++x) source[cell][y][x] = cell_px(cell, x, y);
+    const auto stroke = [&](int cell, int x, int y) { return x >= 0 && x < 32 && y >= 0 && y < 32 && source[cell][y][x] >= 0x22; };
+    const auto colour_at = [&](int cell, int x, int y) {
+        int best = -1, best_d = 1 << 30;
+        for (int inner = 1; inner >= 0 && best < 0; --inner)
+            for (int sy = 0; sy < 32; ++sy)
+                for (int sx = 0; sx < 32; ++sx) {
+                    if (!stroke(cell, sx, sy)) continue;
+                    if (inner && !(stroke(cell, sx - 1, sy) && stroke(cell, sx + 1, sy) && stroke(cell, sx, sy - 1) && stroke(cell, sx, sy + 1))) continue;
+                    const int d = (sx - x) * (sx - x) + (sy - y) * (sy - y);
+                    if (d < best_d) best_d = d, best = source[cell][sy][sx];
+                }
+        return static_cast<std::uint8_t>(best < 0 ? 0xFF : best);
+    };
+    // cell -> (letter, the cell whose colour it takes): Circle B red, Square X blue (the cross's), Triangle Y (the
+    // square's), Cross A green (the triangle's)
+    const int letter[4] = {1, 2, 3, 0}, from[4] = {kCircle, kCross, kSquare, kTriangle};
+    for (int cell = 0; cell < 4; ++cell) {
+        std::uint32_t count[0x22] = {};
+        for (int y = 8; y < 24; ++y)
+            for (int x = 8; x < 24; ++x)
+                if (cell_px(cell, x, y) < 0x22) ++count[cell_px(cell, x, y)];
+        const auto disc = static_cast<std::uint8_t>(std::max_element(std::begin(count) + 1, std::end(count)) - std::begin(count));
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 32; ++x)
+                if (cell_px(cell, x, y) >= 0x22) cell_px(cell, x, y) = disc;
+        for (int row = 0; row < 7; ++row)
+            for (int col = 0; col < 5; ++col) {
+                if (kLetters[letter[cell]][row][col] != '#') continue;
+                for (int dy = 0; dy < 3; ++dy)
+                    for (int dx = 0; dx < 3; ++dx)
+                    {
+                        const int x = 9 + col * 3 + dx, y = 26 - (row * 3 + dy);   // stored upside down
+                        cell_px(cell, x, y) = colour_at(from[cell], x, y);
+                    }
+            }
+    }
+}
+
+void image_bytes(const std::uint8_t *data, std::size_t bytes);
+
 void image_begin(const State &s) {
     flush_image();
+    g_upload_trace.finish();
     Image &im = g_image;
     const std::uint64_t buf = s.bitbltbuf, pos = s.trxpos, reg = s.trxreg;
     im = Image{};
@@ -1441,11 +1592,31 @@ void image_begin(const State &s) {
     im.bpp = bits_per_pixel(im.dpsm);
     im.id = ++g_image_ids ? g_image_ids : ++g_image_ids;
     im.active = im.total != 0;
+    im.hold = prompts_x360() && im.dpsm == PSMT8 && im.rrw == 64 && im.total == 64 * 64;
+    if (g_upload_trace.dir) {
+        UploadTrace &t = g_upload_trace;
+        t.psm = im.dpsm, t.w = im.rrw, t.h = im.rrw ? im.total / im.rrw : 0, t.dbp = im.dbp, t.dbw = im.dbw, t.x = im.dsax, t.y = im.dsay;
+    }
 }
 
 void image_data(const std::uint8_t *data, std::size_t bytes) {
     Image &im = g_image;
     if (!im.active) return;
+    if (g_upload_trace.dir) g_upload_trace.bytes.insert(g_upload_trace.bytes.end(), data, data + bytes);
+    if (im.hold) {
+        im.held.insert(im.held.end(), data, data + bytes);
+        if (im.held.size() < im.total) return;
+        im.hold = false;
+        std::vector<std::uint8_t> whole = std::move(im.held);
+        if (fnv64(whole.data(), im.total) == kWotmButtonSheet) redraw_button_sheet(whole.data());
+        image_bytes(whole.data(), whole.size());
+        return;
+    }
+    image_bytes(data, bytes);
+}
+
+void image_bytes(const std::uint8_t *data, std::size_t bytes) {
+    Image &im = g_image;
     if (im.pending.empty() && !im.lead_bits) {
         const std::uint64_t used = queue_upload(data, bytes, 0);
         const std::size_t whole = static_cast<std::size_t>(used / 8);
@@ -1619,6 +1790,94 @@ void stats() {
     std::fprintf(stderr, "\n");
 }
 
+// The post pass's pipeline (post.wgsl). Without it the window still gets the plain blit.
+void make_post_pipeline() {
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = view(kPostShader);
+    WGPUShaderModuleDescriptor md = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    md.nextInChain = &source.chain;
+    WGPUShaderModule module = wgpuDeviceCreateShaderModule(g_device, &md);
+    WGPUBindGroupLayoutEntry le[3] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+    le[0].binding = 0;
+    le[0].visibility = WGPUShaderStage_Fragment;
+    le[0].texture.sampleType = WGPUTextureSampleType_Float;
+    le[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    le[1].binding = 1;
+    le[1].visibility = WGPUShaderStage_Fragment;
+    le[1].sampler.type = WGPUSamplerBindingType_Filtering;
+    le[2].binding = 2;
+    le[2].visibility = WGPUShaderStage_Fragment;
+    le[2].buffer.type = WGPUBufferBindingType_Uniform;
+    WGPUBindGroupLayoutDescriptor ld = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    ld.entryCount = 3;
+    ld.entries = le;
+    g_post_layout = wgpuDeviceCreateBindGroupLayout(g_device, &ld);
+    WGPUPipelineLayoutDescriptor pld = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pld.bindGroupLayoutCount = 1;
+    pld.bindGroupLayouts = &g_post_layout;
+    WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(g_device, &pld);
+    WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
+    color.format = g_surface_format;
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module = module;
+    fragment.entryPoint = view("fs");
+    fragment.targetCount = 1;
+    fragment.targets = &color;
+    WGPURenderPipelineDescriptor rd = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    rd.layout = pipeline_layout;
+    rd.vertex.module = module;
+    rd.vertex.entryPoint = view("vs");
+    rd.fragment = &fragment;
+    g_post = wgpuDeviceCreateRenderPipeline(g_device, &rd);
+    wgpuShaderModuleRelease(module);
+    wgpuPipelineLayoutRelease(pipeline_layout);
+    WGPUSamplerDescriptor sd = WGPU_SAMPLER_DESCRIPTOR_INIT;
+    sd.magFilter = WGPUFilterMode_Linear;
+    sd.minFilter = WGPUFilterMode_Linear;
+    g_post_sampler = wgpuDeviceCreateSampler(g_device, &sd);
+    g_post_params = make_buffer(16, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
+    if (!g_post) std::fprintf(stderr, "[video] the post pass is unavailable; FXAA and sharpening are off\n");
+}
+
+// The texture the blit draws into when the post pass is on: the window's picture area, remade when it changes.
+void post_target(std::uint32_t width, std::uint32_t height) {
+    if (!g_post) return;
+    if (g_post_image && width == g_post_width && height == g_post_height) {
+        const float params[4] = {1.0f / static_cast<float>(width), 1.0f / static_cast<float>(height), 0.0f, g_filter.sharpen};
+        std::uint32_t words[4];
+        std::memcpy(words, params, sizeof words);
+        words[2] = g_filter.fxaa ? 1u : 0u;
+        wgpuQueueWriteBuffer(g_queue, g_post_params, 0, words, sizeof words);
+        return;
+    }
+    if (g_post_group) wgpuBindGroupRelease(g_post_group);
+    if (g_post_view) wgpuTextureViewRelease(g_post_view);
+    if (g_post_image) wgpuTextureRelease(g_post_image);
+    WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size = {width, height, 1};
+    td.format = g_surface_format;
+    g_post_image = wgpuDeviceCreateTexture(g_device, &td);
+    g_post_view = wgpuTextureCreateView(g_post_image, nullptr);
+    g_post_width = width;
+    g_post_height = height;
+    WGPUBindGroupEntry be[3] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+    be[0].binding = 0;
+    be[0].textureView = g_post_view;
+    be[1].binding = 1;
+    be[1].sampler = g_post_sampler;
+    be[2].binding = 2;
+    be[2].buffer = g_post_params;
+    be[2].size = 16;
+    WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bd.layout = g_post_layout;
+    bd.entryCount = 3;
+    bd.entries = be;
+    g_post_group = wgpuDeviceCreateBindGroup(g_device, &bd);
+    post_target(width, height);
+}
+
 void configure_surface() {
     WGPUSurfaceConfiguration config = WGPU_SURFACE_CONFIGURATION_INIT;
     config.device = g_device;
@@ -1725,6 +1984,7 @@ bool attach_surface(const SurfaceTarget &target) {
     bd.entries = be;
     g_blit_group = wgpuDeviceCreateBindGroup(g_device, &bd);
     wgpuBindGroupLayoutRelease(layout);
+    make_post_pipeline();
     return g_blit != nullptr;
 }
 
@@ -1737,6 +1997,14 @@ void resize_surface(std::uint32_t width, std::uint32_t height) {
 
 bool has_surface() { return g_surface != nullptr; }
 
+void cycle_filter() { g_filter_cycles.fetch_add(1, std::memory_order_relaxed); }
+
+std::string describe(const PostFilter &f) {
+    std::string s = f.fxaa ? "FXAA" : "no anti-aliasing";
+    if (f.sharpen > 0.0f) s += ", sharpening " + std::to_string(static_cast<int>(f.sharpen * 100.0f + 0.5f)) + "%";
+    return s;
+}
+
 bool present(const DisplaySource &src) {
     if (!g_surface) return false;
     flush_all();
@@ -1747,8 +2015,14 @@ bool present(const DisplaySource &src) {
     g_commands.push_back({kDisplay, (src.width * g_scale + 7) / 8, (src.height * g_scale + 7) / 8, param});
     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
     const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
-    const float vw = std::min(sw, sh * aspect), vh = vw / aspect;
-    const std::uint32_t blit[8] = {src.width * g_scale, src.height * g_scale, current, previous, blend ? 1u : 0u, static_cast<std::uint32_t>(vw), static_cast<std::uint32_t>(vh), 0};
+    g_view_w = std::max(1.0f, std::floor(std::min(sw, sh * aspect)));
+    g_view_h = std::max(1.0f, std::floor(g_view_w / aspect));
+    g_view_x = std::floor((sw - g_view_w) * 0.5f);
+    g_view_y = std::floor((sh - g_view_h) * 0.5f);
+    const std::uint32_t vw = static_cast<std::uint32_t>(g_view_w), vh = static_cast<std::uint32_t>(g_view_h);
+    apply_filter_cycles();
+    if (g_filter.fxaa || g_filter.sharpen > 0.0f) post_target(vw, vh);
+    const std::uint32_t blit[8] = {src.width * g_scale, src.height * g_scale, current, previous, blend ? 1u : 0u, vw, vh, 0};
     wgpuQueueWriteBuffer(g_queue, g_blit_params, 0, blit, sizeof blit);
     ++g_field;
     g_have_previous = true;

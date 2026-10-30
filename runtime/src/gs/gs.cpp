@@ -867,6 +867,12 @@ void resize_window(std::uint32_t width, std::uint32_t height) {
 #endif
 }
 
+void cycle_video_filter() {
+#ifdef PS2_GPU
+    gpu::cycle_filter();
+#endif
+}
+
 double gpu_busy_ms() {
 #ifdef PS2_GPU
     return gpu::busy_ms();

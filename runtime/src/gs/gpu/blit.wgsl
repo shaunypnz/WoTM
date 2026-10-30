@@ -48,11 +48,33 @@ fn sample(base: u32, uv: vec2<f32>) -> vec4<f32> {
     return mix(top, bottom, f.y);
 }
 
+// A frame rendered above the window's size (PS2_SCALE 3-4 in a small window) is averaged over each window pixel's
+// footprint instead of read at one point: a grid of bilinear taps (each already 2x2 texels) up to 4x4, so the
+// extra resolution becomes anti-aliasing rather than shimmer. At or below the window's size this is `sample`.
+fn resample(base: u32, uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(f32(blit.width), f32(blit.height));
+    let out = vec2<f32>(f32(blit.out_width), f32(blit.out_height));
+    let ratio = size / out;
+    if (ratio.x <= 2.0 && ratio.y <= 2.0) {
+        return sample(base, uv);
+    }
+    let n = vec2<i32>(clamp(ceil(ratio * 0.5), vec2<f32>(1.0), vec2<f32>(4.0)));
+    let step = 1.0 / (out * vec2<f32>(n));
+    let start = uv - 0.5 / out + step * 0.5;
+    var acc = vec4<f32>(0.0);
+    for (var j = 0; j < n.y; j++) {
+        for (var i = 0; i < n.x; i++) {
+            acc += sample(base, start + step * vec2<f32>(f32(i), f32(j)));
+        }
+    }
+    return acc / f32(n.x * n.y);
+}
+
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-    var c = sample(blit.current, in.uv);
+    var c = resample(blit.current, in.uv);
     if (blit.blend != 0u) {
-        c = (c + sample(blit.previous, in.uv)) * 0.5;
+        c = (c + resample(blit.previous, in.uv)) * 0.5;
     }
     return vec4<f32>(c.rgb, 1.0);
 }

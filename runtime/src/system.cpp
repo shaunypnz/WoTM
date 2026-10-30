@@ -657,6 +657,7 @@ int run() {
 bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height) { return gs::display(rgba, width, height); }
 bool attach_window(const WindowTarget &t) { return gs::attach_window(static_cast<int>(t.kind), t.display, t.window, t.surface, t.selector, t.width, t.height); }
 void resize_window(std::uint32_t width, std::uint32_t height) { gs::resize_window(width, height); }
+void cycle_video_filter() { gs::cycle_video_filter(); }
 bool present_frame() { return gs::present(); }
 void init_graphics() { gs::init(); }
 void start_render_thread() { gs::start_thread(); }

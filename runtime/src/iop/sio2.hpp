@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <vector>
 
 namespace ps2::state {
 class Stream;
@@ -20,5 +22,8 @@ void set_pressure(int pad, int button, std::uint8_t value);
 void set_connected(int pad, bool connected);
 std::uint16_t rumble(int pad);
 void flush_cards(bool force = false);
+// Writes a freshly formatted, empty 8 MB card (raw pages with their ECC spare bytes) into `card`.
+void format_card(std::vector<std::uint8_t> &card);
+std::array<std::uint8_t, 3> chunk_ecc(const std::uint8_t *chunk);
 
 }

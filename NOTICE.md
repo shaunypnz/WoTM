@@ -8,6 +8,9 @@
 - **wgpu-native** (MIT / Apache-2.0) is downloaded from its GitHub releases by `scripts/fetch_wgpu.sh` when you
   first build; it is not part of this repository.
 - **SDL2** (zlib licence) is used from your system.
+- **Picture filters** in `runtime/src/gs/gpu/post.wgsl` are written for this project after published algorithms:
+  FXAA 3.11 by Timothy Lottes (NVIDIA) and Contrast Adaptive Sharpening from AMD FidelityFX (MIT). No code from
+  either is included.
 
 No part of War of the Monsters (disc image, executable, IOP modules, audio, video, textures or other assets) is
 included in this repository or its releases. You need your own copy of the game.

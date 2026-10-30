@@ -3,11 +3,21 @@
 #include "../gs.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace ps2::gs::gpu {
 
 enum class Mode { off, mirror, primary };
+
+// Internal resolution multiplier cap (PS2_SCALE 1..4). VRAM and the frame buffers grow with its square.
+constexpr std::uint32_t kMaxScale = 4;
+
+// The window output's optional post pass (PS2_AA=fxaa, PS2_SHARPEN=0..1; F9 cycles presets in the window).
+struct PostFilter {
+    bool fxaa = false;
+    float sharpen = 0.0f;
+};
 
 struct DisplaySource {
     std::uint32_t fbp, fbw, psm, dbx, dby, width, height;
@@ -43,6 +53,9 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
 bool attach_surface(const SurfaceTarget &target);
 void resize_surface(std::uint32_t width, std::uint32_t height);
 bool has_surface();
+// F9: the next filter preset (none, FXAA, FXAA + sharpening, sharpening), applied at the next present. Any thread.
+void cycle_filter();
+std::string describe(const PostFilter &f);
 bool present(const DisplaySource &src);
 double busy_ms();
 void stats();

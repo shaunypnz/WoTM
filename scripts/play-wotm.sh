@@ -16,8 +16,9 @@ Two versions, built side by side in the same folder:
   --mode ps2   the original game: memory cards in cards/, 4:3, intro movies, unlock as you play
   --mode pc    PC edition: no memory card to manage (the game state saves itself every 5 minutes
                and when you close the window, and the next launch carries on from there),
-               16:9 widescreen, 2x resolution (PS2_SCALE), intro skipped, every arena and monster
-               unlocked. Later epic options (split screen, more monsters, bots, online) join here.
+               16:9 widescreen, 2x resolution (PS2_SCALE) with edge smoothing (PS2_AA), intro skipped,
+               every arena and monster unlocked. Later epic options (split screen, more monsters, bots,
+               online) join here.
 
 options:
   --dir DIR          the game folder (default: the launcher's own folder when run from one,
@@ -29,16 +30,28 @@ options:
   --new-game         pc: ignore the autosave once (it is kept until the next save)
   --jobs N           compiler jobs (default: all cores; PS2_JOBS works too)
   --install-desktop  add app-menu and desktop icons for both versions
+  --warm-up          from the source tree: play a short fight unattended without a window (about 10 minutes),
+                     record the vector unit programs it meets, and compile them into both versions, so the
+                     first real launch runs at full speed instead of interpreting them (a fresh install
+                     otherwise runs slowly until it has been played once and rebuilt)
   --dry-run          print what would run and stop
 
 keys: arrows move, Z/Space = X, X = O, A = square, S = triangle, Q/W = L1/R1,
-1/2 = L2/R2, Enter = Start, IJKL camera, F11 fullscreen; any SDL game pad works.
+1/2 = L2/R2, Enter = Start, IJKL camera, F9 picture filter, F11 fullscreen; any SDL game pad works.
+
+Picture settings live in the game folder's local.env (written on the first build, every line explained):
+PS2_SCALE=1..4 internal resolution, PS2_AA=fxaa|off edge smoothing, PS2_SHARPEN=0..1 sharpening.
 EOF
 }
 
 # play-*.bat under Wine hands its arguments over in WOTM_BAT_ARGS (start /unix keeps quotes literally)
-if [ -n "${WOTM_BAT_ARGS+x}" ]; then eval "set -- $WOTM_BAT_ARGS"; unset WOTM_BAT_ARGS WOTM_LAUNCH; fi
-iso=""; dir=""; mode=ps2; build_only=0; rebuild=0; fullscreen=0; new_game=0; desktop=0; dry=0
+# (split as shell words, never evaluated: a file name holding $(...) stays a file name)
+if [ -n "${WOTM_BAT_ARGS+x}" ]; then
+  mapfile -d '' -t bat_args < <(python3 -I -c 'import os, shlex, sys; sys.stdout.write("".join(a + "\0" for a in shlex.split(os.environ["WOTM_BAT_ARGS"])))')
+  set -- "${bat_args[@]}"
+  unset WOTM_BAT_ARGS WOTM_LAUNCH bat_args
+fi
+iso=""; dir=""; mode=ps2; build_only=0; rebuild=0; fullscreen=0; new_game=0; desktop=0; dry=0; warm_up=0
 jobs="${PS2_JOBS:-}"; runner=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,6 +63,7 @@ while [ $# -gt 0 ]; do
     --new-game) new_game=1 ;;
     --jobs) jobs="$2"; shift ;;
     --install-desktop) desktop=1 ;;
+    --warm-up) warm_up=1 ;;
     --dry-run) dry=1 ;;
     --) shift; runner=("$@"); break ;;
     -h|--help) usage; exit 0 ;;
@@ -173,12 +187,43 @@ War of the Monsters - native build of your own disc
   play-pc.sh  / play-pc.bat    PC edition: saves itself (pc/autosave.state, every 5 minutes and on close) and
                                carries on there next time; 16:9, 2x resolution, intro skipped, all unlocked.
                                --new-game starts fresh once (the autosave is kept until the next save).
-  local.env                    optional, this machine's settings: KEY=VALUE lines (GPU choice, PS2_SCALE=1..3)
+  local.env                    this machine's settings, KEY=VALUE lines (resolution, picture filters, GPU)
 
 The .bat files work under Wine (they hand over to the .sh beside them) and on Windows with WSL2.
 Everything the game needs is in this folder except the disc image (its path is in disc.path).
 logs/ has one log per launch; send the newest one when something goes wrong.
+F9 in the game window cycles the picture filter (none, FXAA, FXAA + sharpening, sharpening); F11 is fullscreen.
 EOF
+  # The settings file is the player's: written once, never overwritten.
+  if [ ! -f "$dir/local.env" ]; then
+    cat > "$dir/local.env" <<'EOF'
+# War of the Monsters - this machine's settings. One KEY=VALUE per line; remove the leading # to use a line.
+# play-ps2.sh / play-pc.sh read this file at every launch, after their own defaults, so a line here wins.
+#
+# Internal resolution, 1-4 times the PS2's (PS2 edition default 1, PC edition default 2). Above the window's size
+# the extra pixels become anti-aliasing. GPU time grows with its square: 3-4 want a mid-range GPU or better.
+#PS2_SCALE=3
+#
+# Edge smoothing in the window (FXAA): fxaa or off (PC edition default fxaa, PS2 edition off).
+#PS2_AA=off
+#
+# Sharpening after scaling, 0 (off) to 1 (strong) (PC edition default 0.3, PS2 edition 0). F9 cycles filters.
+#PS2_SHARPEN=0.4
+#
+# Button remapping: <controller button or key>:<PS2 button>, comma-separated (PS2 buttons: cross circle square
+# triangle l1 r1 l2 r2 l3 r3 select start up down left right, or none). Controller buttons use SDL's names
+# (a b x y leftshoulder rightshoulder back start leftstick rightstick dpup dpdown dpleft dpright), keys too
+# (z, space, return, left shift, ...). Example: swap jump and the light attack on the pad, J for square on keys.
+#PS2_PAD_MAP=a:square,x:cross
+#PS2_KEY_MAP=j:square
+#
+# Xbox 360 button prompts in menus: the game's Cross/Circle/Square/Triangle icons drawn as A/B/X/Y.
+#PS2_PROMPTS=x360
+#
+# The GPU to use when there are several (a Vulkan ICD file from /usr/share/vulkan/icd.d), e.g. AMD with Mesa:
+#VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+EOF
+  fi
   # PS2_RUNTIME_LIBS: shared libraries the target machine lacks (e.g. a 64-bit SDL2), copied into lib/
   if [ -n "${PS2_RUNTIME_LIBS:-}" ]; then mkdir -p "$dir/lib"; cp -L "$PS2_RUNTIME_LIBS"/*.so* "$dir/lib/"; fi
 }
@@ -211,7 +256,44 @@ EOF
   echo "desktop icons: War of the Monsters (PS2 / PC edition)"
 }
 
+# --warm-up: the PC edition's quick-play route (title, Free-for-All, one CPU, a fight with a punch every 8 s) with
+# no window, recording every vector unit program into vu1/; then both editions are rebuilt with them compiled in.
+# The programs come from the player's own disc at run time; nothing recorded is shipped.
+warm_up_run() {
+  local pc="$dir/pc" card presses=() f
+  [ -x "$pc/build/ps2run" ] || "$src/scripts/play-wotm.sh" --dir "$dir" --mode pc --build-only ${jobs:+--jobs "$jobs"}
+  for f in 540:start 660:cross 780:down 900:cross 1020:down 1140:cross 1260:cross 1380:cross 1500:cross 1740:cross \
+           4200:triangle 4680:triangle 5160:triangle 5640:triangle 6120:triangle 6600:triangle 7080:triangle 7560:triangle; do
+    presses+=(--press "$f:8")
+  done
+  card=$(mktemp "$dir/logs/warm-up-card.XXXXXX")
+  rm -f "$card"
+  local log="$dir/logs/warm-up-$(date +%Y%m%d-%H%M%S).log" before
+  before=$(find "$dir/vu1" -name '*.bin' | wc -l)
+  echo "== warm-up: a short unattended fight without a window (about 10 minutes), recording vector unit programs"
+  [ -f "$dir/local.env" ] && while IFS='=' read -r key value; do
+    case "$key" in ''|\#*) ;; *) export "$key=$value" ;; esac
+  done < "$dir/local.env"
+  local patches=()
+  [ -s "$pc/patches.txt" ] && patches=(--patches "$pc/patches.txt")
+  [ -d "$dir/lib" ] && export LD_LIBRARY_PATH="$dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  PS2_GS="${PS2_GS:-gpu}" PS2_VU_RECORD="$dir/vu1" "$pc/build/ps2run" "$pc/SCUS_971.97" --disc "$iso" --ntsc \
+    --memcard "$card" --widescreen "${patches[@]}" --frames 7800 "${presses[@]}" > "$log" 2>&1 || {
+    rm -f "$card"; tail -5 "$log"; echo "warm-up run failed, see $log" >&2; exit 1; }
+  rm -f "$card"
+  echo "recorded $(( $(find "$dir/vu1" -name '*.bin' | wc -l) - before )) new vector unit programs ($log)"
+  local m
+  for m in ps2 pc; do
+    [ -x "$dir/$m/build/ps2run" ] || [ "$m" = "$mode" ] || continue
+    "$src/scripts/play-wotm.sh" --dir "$dir" --mode "$m" --build-only ${jobs:+--jobs "$jobs"}
+  done
+}
+
 if [ -n "$src" ] && [ "$dry" = 0 ]; then prepare; fi
+if [ "$warm_up" = 1 ]; then
+  [ -n "$src" ] || { echo "--warm-up needs the source tree (it compiles what it records): run scripts/play-wotm.sh from there" >&2; exit 2; }
+  [ "$dry" = 1 ] || warm_up_run
+fi
 [ "$desktop" = 0 ] || install_desktop
 [ "$build_only" = 0 ] || exit 0
 
@@ -229,13 +311,13 @@ else
   args+=(--memcard "$out/system.ps2" --widescreen --autosave "$out/autosave.state:18000")
   [ -s "$out/patches.txt" ] && args+=(--patches "$out/patches.txt")
   if [ -f "$out/autosave.state" ] && [ "$new_game" = 0 ]; then args+=(--load-state "$out/autosave.state"); fi
-  export PS2_SCALE="${PS2_SCALE:-2}"
+  export PS2_SCALE="${PS2_SCALE:-2}" PS2_AA="${PS2_AA:-fxaa}" PS2_SHARPEN="${PS2_SHARPEN:-0.3}"
 fi
 [ "$fullscreen" = 0 ] || args+=(--fullscreen)
 if [ "$mode" = ps2 ]; then edition="PS2"; else edition="PC edition"; fi
-export PS2_WINDOW_TITLE="${PS2_WINDOW_TITLE:-War of the Monsters ($edition) - arrows move | Z/Space X  X O  A []  S /\\  Q L1  W R1  1 L2  2 R2 | Enter Start | IJKL camera | F11 fullscreen}"
+export PS2_WINDOW_TITLE="${PS2_WINDOW_TITLE:-War of the Monsters ($edition) - arrows move | Z/Space X  X O  A []  S /\\  Q L1  W R1  1 L2  2 R2 | Enter Start | IJKL camera | F9 filter | F11 fullscreen}"
 [ -d "$dir/lib" ] && export LD_LIBRARY_PATH="$dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-# local.env: this machine's own settings, one KEY=VALUE per line (e.g. VK_ICD_FILENAMES to pick the GPU, PS2_SCALE)
+# local.env: this machine's own settings, one KEY=VALUE per line (PS2_SCALE, PS2_AA, PS2_SHARPEN, VK_ICD_FILENAMES)
 if [ -f "$dir/local.env" ]; then
   while IFS='=' read -r key value; do
     case "$key" in ''|\#*) ;; *) export "$key=$value" ;; esac

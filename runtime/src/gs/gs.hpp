@@ -80,6 +80,7 @@ bool copy_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uin
 bool copy_frame(const DisplayRegs &regs, std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
 bool attach_window(int kind, void *display, std::uint64_t window, void *surface, const char *selector, std::uint32_t width, std::uint32_t height);
 void resize_window(std::uint32_t width, std::uint32_t height);
+void cycle_video_filter();
 bool present();
 bool present(const DisplayRegs &regs);
 void start_thread();

@@ -121,6 +121,8 @@ struct WindowTarget {
 // Lets the WebGPU renderer present straight to a window or canvas instead of handing frames back.
 bool attach_window(const WindowTarget &target);
 void resize_window(std::uint32_t width, std::uint32_t height);
+// The window output's next filter preset (F9): none, FXAA, FXAA + sharpening, sharpening.
+void cycle_video_filter();
 bool present_frame();
 void init_graphics();
 void start_render_thread();

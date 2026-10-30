@@ -7,6 +7,8 @@
 #include "ps2/state.hpp"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -178,7 +180,12 @@ void load_card() {
     std::ifstream in(g_options.memcard_path, std::ios::binary);
     if (in) in.read(reinterpret_cast<char *>(g_card.data.data()), static_cast<std::streamsize>(kCardBytes));
     g_card.present = true;
-    std::fprintf(stderr, "[mc] card in slot 1: %s%s\n", g_options.memcard_path.c_str(), in ? "" : " (new, unformatted)");
+    // A card that was never written (no file yet, or every byte still erased) goes in formatted, like a card from
+    // the shop: War of the Monsters checks slot 1 at boot and carries on without settings or saves when the card
+    // is unformatted. Nothing on a blank card can be lost.
+    const bool blank = std::all_of(g_card.data.begin(), g_card.data.end(), [](std::uint8_t b) { return b == 0xFF; });
+    if (blank) format_card(g_card.data);
+    std::fprintf(stderr, "[mc] card in slot 1: %s%s\n", g_options.memcard_path.c_str(), !blank ? "" : in ? " (blank, formatted)" : " (new, formatted)");
 }
 
 void memory_card(std::size_t at, std::uint32_t out_size) {
@@ -300,6 +307,93 @@ void run_transfer() {
     hw::raise_interrupt(17);
 }
 
+}
+
+// The ECC of one 128-byte chunk as the memory card stores it (3 bytes: column parity, then the two line parities).
+std::array<std::uint8_t, 3> chunk_ecc(const std::uint8_t *chunk) {
+    static const std::array<std::uint8_t, 256> column = [] {
+        std::array<std::uint8_t, 256> t{};
+        const std::uint8_t masks[7] = {0x55, 0x33, 0x0F, 0x00, 0xAA, 0xCC, 0xF0};
+        for (int b = 0; b < 256; ++b)
+            for (int i = 0; i < 7; ++i)
+                if (std::popcount(static_cast<unsigned>(b & masks[i])) & 1) t[b] |= static_cast<std::uint8_t>(1u << i);
+        return t;
+    }();
+    std::uint8_t cp = 0x77, lp0 = 0x7F, lp1 = 0x7F;
+    for (int i = 0; i < 128; ++i) {
+        const std::uint8_t b = chunk[i];
+        cp ^= column[b];
+        if (std::popcount(static_cast<unsigned>(b)) & 1) {
+            lp0 ^= static_cast<std::uint8_t>(~i);
+            lp1 ^= static_cast<std::uint8_t>(i);
+        }
+    }
+    return {cp, static_cast<std::uint8_t>(lp0 & 0x7F), lp1};
+}
+
+void format_card(std::vector<std::uint8_t> &card) {
+    // The layout the PS2's own formatter writes on an 8 MB card: superblock in cluster 0, one indirect-FAT cluster
+    // (8), 32 FAT clusters (9-40), then allocatable clusters from 41 with the root directory first. Clusters are
+    // 2 pages of 512 bytes, erase blocks 16 pages; every page carries 16 spare bytes (4 x 3 ECC bytes, then 4 zero).
+    constexpr std::uint32_t kPage = 512, kClusterPages = 2, kClusters = kPages / kClusterPages, kIfc = 8, kFatClusters = 32;
+    constexpr std::uint32_t kAllocOffset = kIfc + 1 + kFatClusters, kGoodBlock2 = kPages / kBlockPages - 2;
+    constexpr std::uint32_t kAllocEnd = kGoodBlock2 * (kBlockPages / kClusterPages) - kAllocOffset;
+    std::vector<std::uint8_t> plain(static_cast<std::size_t>(kPages) * kPage, 0xFF);
+    const auto put16 = [&](std::size_t at, std::uint16_t v) { std::memcpy(&plain[at], &v, 2); };
+    const auto put32 = [&](std::size_t at, std::uint32_t v) { std::memcpy(&plain[at], &v, 4); };
+    const auto cluster = [&](std::uint32_t c) { return static_cast<std::size_t>(c) * kClusterPages * kPage; };
+
+    static const char kMagic[] = "Sony PS2 Memory Card Format ";
+    static const char kVersion[] = "1.2.0.0";
+    std::memcpy(&plain[0], kMagic, 28);
+    std::memset(&plain[28], 0, 12);
+    std::memcpy(&plain[28], kVersion, 7);
+    put16(0x28, kPage);
+    put16(0x2A, kClusterPages);
+    put16(0x2C, kBlockPages);
+    put16(0x2E, 0xFF00);
+    put32(0x30, kClusters);
+    put32(0x34, kAllocOffset);
+    put32(0x38, kAllocEnd);
+    put32(0x3C, 0);                          // root directory: allocatable cluster 0
+    put32(0x40, kPages / kBlockPages - 1);   // backup blocks
+    put32(0x44, kPages / kBlockPages - 2);
+    std::memset(&plain[0x48], 0, 8);
+    put32(0x50, kIfc);                       // indirect FAT cluster list, the rest unused (0xFFFFFFFF)
+    plain[0x150] = 2;                        // card type: PS2
+    plain[0x151] = 0x52;                     // card flags, as the PS2's formatter sets them
+
+    for (std::uint32_t i = 0; i < kFatClusters; ++i) put32(cluster(kIfc) + i * 4, kIfc + 1 + i);
+    for (std::uint32_t e = 0; e < kFatClusters * kClusterPages * kPage / 4; ++e)
+        put32(cluster(kIfc + 1) + e * 4, e == 0 ? 0xFFFFFFFFu : e < kAllocEnd ? 0x7FFFFFFFu : 0xFFFFFFFFu);
+
+    // The root directory's "." and ".." entries (512 bytes each, one cluster).
+    const std::size_t root = cluster(kAllocOffset);
+    std::fill_n(plain.begin() + static_cast<std::ptrdiff_t>(root), 2 * kPage, 0x00);
+    put16(root + 0x00, 0x8427);              // exists | 0x400 | directory | rwx
+    put32(root + 0x04, 2);                   // two entries
+    put16(root + kPage + 0x00, 0xA426);      // exists | hidden | 0x400 | directory | wx
+    plain[root + 0x40] = '.';
+    plain[root + kPage + 0x40] = '.';
+    plain[root + kPage + 0x41] = '.';
+    // created/modified stamps: 2002-01-01 00:00:00 (a fixed date keeps formatted cards identical)
+    for (const std::size_t entry : {root, root + kPage})
+        for (const std::size_t at : {entry + 0x08, entry + 0x18}) {
+            const std::uint8_t tod[8] = {0, 0, 0, 0, 1, 1, 0xD2, 0x07};
+            std::memcpy(&plain[at], tod, 8);
+        }
+
+    card.assign(kCardBytes, 0xFF);
+    for (std::uint32_t page = 0; page < kPages; ++page) {
+        const std::uint8_t *data = &plain[static_cast<std::size_t>(page) * kPage];
+        std::uint8_t *raw = &card[static_cast<std::size_t>(page) * kPageBytes];
+        std::memcpy(raw, data, kPage);
+        for (int chunk = 0; chunk < 4; ++chunk) {
+            const auto ecc = chunk_ecc(data + chunk * 128);
+            std::memcpy(raw + kPage + chunk * 3, ecc.data(), 3);
+        }
+        std::memset(raw + kPage + 12, 0, 4);
+    }
 }
 
 void reset() {

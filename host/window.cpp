@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -58,6 +59,55 @@ constexpr PadBinding kPadButtons[] = {
     {SDL_CONTROLLER_BUTTON_DPAD_UP, kUp},       {SDL_CONTROLLER_BUTTON_DPAD_DOWN, kDown},
     {SDL_CONTROLLER_BUTTON_DPAD_LEFT, kLeft},   {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, kRight},
 };
+
+// The bindings in use: the tables above, changed by PS2_PAD_MAP / PS2_KEY_MAP (local.env), e.g.
+//   PS2_PAD_MAP=a:circle,b:cross     PS2_KEY_MAP=j:square,k:cross
+// Each entry gives an SDL controller button (a, b, x, y, leftshoulder, back, dpup, ...) or key name (as SDL names
+// it: z, space, return, left shift, ...) the PS2 button it presses (cross circle square triangle l1 r1 l2 r2 l3 r3
+// select start up down left right), or "none"; it replaces what that button or key did.
+std::vector<KeyBinding> g_keys(std::begin(kKeys), std::end(kKeys));
+std::vector<PadBinding> g_pad_buttons(std::begin(kPadButtons), std::end(kPadButtons));
+
+int ps2_button(const std::string &name) {
+    static const std::pair<const char *, std::uint16_t> kNames[] = {
+        {"select", kSelect}, {"l3", kL3}, {"r3", kR3}, {"start", kStart}, {"up", kUp}, {"right", kRight},
+        {"down", kDown}, {"left", kLeft}, {"l2", kL2}, {"r2", kR2}, {"l1", kL1}, {"r1", kR1},
+        {"triangle", kTriangle}, {"circle", kCircle}, {"cross", kCross}, {"square", kSquare}, {"none", 0}};
+    for (const auto &[n, mask] : kNames)
+        if (name == n) return mask;
+    return -1;
+}
+
+void load_remaps() {
+    const auto entries = [](const char *env, auto &&apply) {
+        const char *spec = std::getenv(env);
+        if (!spec) return;
+        std::stringstream in(spec);
+        std::string item;
+        while (std::getline(in, item, ',')) {
+            const auto colon = item.rfind(':');
+            const int button = colon == std::string::npos ? -1 : ps2_button(item.substr(colon + 1));
+            if (button < 0 || !apply(item.substr(0, colon), static_cast<std::uint16_t>(button)))
+                std::fprintf(stderr, "[input] %s: cannot use \"%s\" (want <button or key>:<ps2 button>)\n", env, item.c_str());
+            else
+                std::fprintf(stderr, "[input] %s %s\n", env, item.c_str());
+        }
+    };
+    entries("PS2_PAD_MAP", [](const std::string &name, std::uint16_t mask) {
+        const SDL_GameControllerButton b = SDL_GameControllerGetButtonFromString(name.c_str());
+        if (b == SDL_CONTROLLER_BUTTON_INVALID) return false;
+        std::erase_if(g_pad_buttons, [&](const PadBinding &p) { return p.button == b; });
+        if (mask) g_pad_buttons.push_back({b, mask});
+        return true;
+    });
+    entries("PS2_KEY_MAP", [](const std::string &name, std::uint16_t mask) {
+        const SDL_Scancode k = SDL_GetScancodeFromName(name.c_str());
+        if (k == SDL_SCANCODE_UNKNOWN) return false;
+        std::erase_if(g_keys, [&](const KeyBinding &p) { return p.key == k; });
+        if (mask) g_keys.push_back({k, mask});
+        return true;
+    });
+}
 
 SDL_Window *g_window = nullptr;
 SDL_Renderer *g_renderer = nullptr;
@@ -166,7 +216,7 @@ void poll_port(int port) {
         const Uint8 *state = SDL_GetKeyboardState(nullptr);
         const Uint64 now = SDL_GetTicks64();
         const auto keys = [&](SDL_Scancode k) { return state[k] || g_key_down[k] || now < g_key_until[k]; };
-        for (const KeyBinding &b : kKeys)
+        for (const KeyBinding &b : g_keys)
             if (keys(b.key)) pressed |= b.button;
         if (keys(SDL_SCANCODE_LEFT)) lx = 0x00;
         if (keys(SDL_SCANCODE_RIGHT)) lx = 0xFF;
@@ -178,7 +228,7 @@ void poll_port(int port) {
         if (keys(SDL_SCANCODE_K)) ry = 0xFF;
     }
     if (pad) {
-        for (const PadBinding &b : kPadButtons)
+        for (const PadBinding &b : g_pad_buttons)
             if (SDL_GameControllerGetButton(pad, b.button)) pressed |= b.mask;
         const auto trigger = [&](SDL_GameControllerAxis a, std::uint16_t bit, std::uint8_t &pressure) {
             const int v = SDL_GameControllerGetAxis(pad, a);
@@ -219,6 +269,7 @@ void poll() {
             SDL_SetWindowFullscreen(g_window, full ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             SDL_ShowCursor(full ? SDL_ENABLE : SDL_DISABLE);
         }
+        if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F9 && !e.key.repeat && g_gpu_present) ps2::cycle_video_filter();
         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED && g_gpu_present) {
             int w = 0, h = 0;
             SDL_GetWindowSizeInPixels(g_window, &w, &h);
@@ -391,10 +442,16 @@ void queue_audio(const std::int16_t *samples, std::size_t frames) {
 bool open_window(bool fullscreen) {
     // a controller keeps working while another window has focus (a pad needs no focus on a console either)
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    // sound only where the player can see the game: a run on a hidden display (Xvfb benches, gates) or with no
+    // display at all still paces itself on the dummy driver's clock, but stays silent on the desk's speakers
+    const char *display = std::getenv("DISPLAY");
+    const bool desktop = std::getenv("WAYLAND_DISPLAY") || (display && (!std::strcmp(display, ":0") || !std::strcmp(display, ":0.0")));
+    if (!desktop && !std::getenv("SDL_AUDIODRIVER")) setenv("SDL_AUDIODRIVER", "dummy", 1);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL: %s\n", SDL_GetError());
         return false;
     }
+    load_remaps();
     const Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0u);
     const char *label = std::getenv("PS2_WINDOW_TITLE");
     g_window = SDL_CreateWindow(label ? label : "ps2-web-recomp", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ps2::g_options.widescreen ? 1280 : 960, 720, flags);
