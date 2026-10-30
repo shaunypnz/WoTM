@@ -2,9 +2,15 @@
 
 # War of the Monsters Recompiled!
 
-A native Windows port of **War of the Monsters** (PS2, 2003), built from the statically recompiled game code and easy to mod.
+A native port of **War of the Monsters** (PS2, 2003), built from the statically recompiled game code and easy to mod.
 
-[⬇️ Grab latest version here](https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest)!
+**This is a Linux-focused fork.** The port, the decompilation and almost everything here is the work of [Yan Moura](https://github.com/yanm1103) and contributors in [War_of_the_Monsters_recomp](https://github.com/yanm1103/War_of_the_Monsters_recomp): go there for the Windows release and to report Windows bugs. Credit for the game work belongs there.
+
+**What this fork adds:** a native Linux build and installer from your own disc (see [Building the port (Linux)](#building-the-port-linux)) and FXAA and sharpening filters. Linux status: fights run in a window, including 4-player, on the software renderer; speed on a real GPU, adventure mode, saves and game pads are still being tested. A Vulkan renderer is planned next.
+
+**Where this fork came from:** we were separately building our own Linux port of the game on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). When we found this project, it was further along, so we moved our work here and are carrying over what it didn't already have.
+
+Windows players: [grab the upstream release](https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest).
 
 ## Play
 1. unzip
@@ -13,7 +19,7 @@ A native Windows port of **War of the Monsters** (PS2, 2003), built from the sta
 
 More details in the README file ([tools/release/README.txt](tools/release/README.txt)).
 
-Found a bug? Open an [issue](https://github.com/yanm1103/War_of_the_Monsters_recomp/issues) and attach `wotm.log` (along your save files).
+Found a bug in the Windows release? Open an [issue upstream](https://github.com/yanm1103/War_of_the_Monsters_recomp/issues) and attach `wotm.log` (along your save files).
 
 ## Mods
 PNG Textures, skins and custom monsters go in the `mods\` folder next to `wotm.exe`. The release ships with Goliath Prime and Cerebulon as playable custom monsters (these are just for fun, don't open issues if they can't jump or can't do any other specific actions!).
