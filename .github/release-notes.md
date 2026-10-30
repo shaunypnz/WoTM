@@ -13,6 +13,9 @@ tools/linux/build.sh --iso /path/to/your.iso --dir ~/Games/WotM
 ```
 You need Linux on x86-64 and a CPU with AVX2, plus git, Python 3, CMake 3.24+, Ninja, g++, pkg-config, and the FFmpeg and X11/GL development packages. The Ubuntu install command is at the top of `tools/linux/build.sh`. The first build compiles the whole translated game and takes a while.
 
+## Steam Deck
+Not yet tried on a real Deck. In Desktop Mode, in Konsole, clone as above without building, then run `tools/linux/steamdeck.sh --iso /path/to/your.iso`. It builds in a throwaway container and adds the game to Steam. Expect a long build, and please report how it goes.
+
 ## What works
 - Native Linux build and installer from your own disc
 - Starts in a 1280x720 window; F11 for fullscreen, Ctrl+Q to close

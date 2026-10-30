@@ -34,6 +34,8 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [doc
 ## Building the port (Linux)
 `tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` builds from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work.
 
+**Steam Deck (not yet tried on a real Deck):** in Desktop Mode, in Konsole, clone this repo and run `tools/linux/steamdeck.sh --iso <your.iso>`. It builds inside a throwaway Ubuntu container, so nothing is installed on SteamOS, then adds the game to Steam. Use the overlay to quit in Game Mode. The build takes a long time, so keep the Deck plugged in.
+
 To test a build, `tools/linux/scenarios.py --game <folder>` runs bot-only scenarios in private windows and fails on a crash, an early exit, or a blank or frozen picture (`--list` shows them). `--spectate` lets you watch the bots on your own screen.
 
 Picture filters at the window output: `WOTM_FXAA=1` (edge smoothing) and `WOTM_SHARPEN=0..1` (contrast-adaptive sharpening, after AMD's CAS). Both are off by default.
