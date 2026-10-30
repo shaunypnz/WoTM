@@ -22,6 +22,8 @@ SCENARIOS = {
     "split4": ("4-player split screen", {**FIGHT, "WOTM_PLAYERS": "4", "WOTM_MATCH": "3,1,2,4,1"}),
     "eight": ("8 monsters on one stage", {**FIGHT, "WOTM_MATCH": "3,1,2,4,5,7,8,9,1"}),
     "filters": ("FXAA and sharpening", {**FIGHT, "WOTM_MATCH": "3,1,1", "WOTM_FXAA": "1", "WOTM_SHARPEN": "0.5"}),
+    "legacy": ("options panel: LEGACY tab opens", {"WOTM_SKIPINTRO": "1", "PS2X_PAD": "10:0.3:start;15:0.3:start;20:0.3:start;25:0.3:start", "WOTM_LEGACY_TEST": "1", "_log": r"\[legacy\] aba aberta"}),
+    "legacyrun": ("LEGACY tab starts the original engine", {"WOTM_SKIPINTRO": "1", "PS2X_PAD": "10:0.3:start;15:0.3:start;20:0.3:start;25:0.3:start", "WOTM_LEGACY_TEST": "2", "_marker": "1"}),
     "hires": ("1080 lines, MSAA 4x", {**FIGHT, "WOTM_MATCH": "3,1,1", "WOTM_RES": "1080", "WOTM_MSAA": "4"}),
 }
 SPECTATE = ["duel", "stage2", "stage3", "stage5", "split2", "split4", "eight"]
@@ -101,9 +103,15 @@ def log_checks(log, seconds):
 
 def run_one(name, game, iso, seconds, out, xvfb):
     what, env = SCENARIOS[name]
-    d = os.path.join(out, name)
+    d = os.path.abspath(os.path.join(out, name))
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
+    want_log, marker = env.get("_log"), None
+    env = {k: v for k, v in env.items() if not k.startswith("_")} | ({} if "_marker" not in SCENARIOS[name][1] else {"WOTM_LEGACY_DIR": d})
+    if "_marker" in SCENARIOS[name][1]:   # um "motor original" de teste: prova que o lancamento chegou aqui
+        marker = os.path.join(d, "legacy-started")
+        with open(os.path.join(d, "play-pc.sh"), "w") as f:
+            f.write(f"#!/bin/sh\ntouch '{marker}'\nexec sleep 3600\n")
     n = free_display()
     x = subprocess.Popen(xvfb.split() + [f":{n}", "-screen", "0", "1920x1080x24", "-nolisten", "tcp", "-ac"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
@@ -137,7 +145,13 @@ def run_one(name, game, iso, seconds, out, xvfb):
     bad, info = log_checks(text, elapsed)
     if early is not None:
         bad.append(f"exited early with status {early} after {int(elapsed)} s")
-    bad += picture_checks(shots)
+    if marker:
+        if not os.path.exists(marker):
+            bad.append("the original engine was not started")
+    else:
+        bad += picture_checks(shots)
+    if want_log and not re.search(want_log, text):
+        bad.append(f"log line not found: {want_log}")
     contact_sheet(shots, os.path.join(d, "sheet.png"))
     for s in shots[:-4]:
         os.remove(s)

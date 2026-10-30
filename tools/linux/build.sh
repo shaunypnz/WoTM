@@ -66,6 +66,10 @@ B=$RT/build_dev; mkdir -p "$B/wotm_gen"
 [ -f "$B/wotm_gen/wotm_vu0_native.gen.inc" ] || python3 "$REPO/tools/vu0native.py" "$WORK/game.elf" "$B/wotm_gen/wotm_vu0_native.gen.inc" >/dev/null
 VER="#define WOTM_VERSION \"$(git -C "$REPO" describe --tags --always --dirty 2>/dev/null || echo dev)\""
 [ "$(cat "$B/wotm_gen/wotm_version.gen.h" 2>/dev/null)" = "$VER" ] || echo "$VER" > "$B/wotm_gen/wotm_version.gen.h"
+# The LEGACY tab of the options panel names the last change to legacy/, so it follows the repository on its own
+LEG="#define WOTM_LEGACY_COMMIT \"$(git -C "$REPO" log -1 --format=%h -- legacy 2>/dev/null | tr a-z A-Z)\""
+[ "$LEG" = '#define WOTM_LEGACY_COMMIT ""' ] && LEG='#define WOTM_LEGACY_COMMIT "UNKNOWN"'
+[ "$(cat "$B/wotm_gen/wotm_legacy.gen.h" 2>/dev/null)" = "$LEG" ] || echo "$LEG" > "$B/wotm_gen/wotm_legacy.gen.h"
 [ -f "$B/build.ninja" ] || cmake -S "$PR" -G Ninja -DCMAKE_BUILD_TYPE=Release "${CM_ARGS[@]}" -DGLFW_BUILD_WAYLAND=OFF \
   -DWOTM_NATIVE_DIR="$REPO/native" -DPS2X_FAST_LINK=ON -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_IOP_RPC_TRACE=OFF \
   -DPS2X_BUILD_RECOMP=OFF -DPS2X_BUILD_ANALYZER=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_ENABLE_DEBUG_UI=OFF \

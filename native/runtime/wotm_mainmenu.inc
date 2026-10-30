@@ -23,6 +23,7 @@
 // targetAlpha nos fades de/para a 20 (logoFrame, a cada quadro antes da coleta da cena). Sem ele a lista fica centrada no telao.
 // Tela 5: enquanto a escolha de controles esta no telao a lista fica escondida, e aparece junto com o fade que a escolha da aos itens.
 // WOTM_TEXTMENU=0: itens do retail (e o rotulo "multiplayer" do wotm_padsel.inc).
+#include "wotm_legacy.hpp"
 #include "wotm_training.h"   // linha "training" da tela 2 (g_on)
 // tela de opcoes do jogo (wotm_optscreen.inc, incluido depois): chamadas dos ganchos daqui
 namespace wotm_optscreen
@@ -120,8 +121,8 @@ static int g_pauseSuppress = 0;
 // Cada opcao e uma chave do wotm_settings.hpp; mudar grava o settings.ini e vale na hora (video na thread da janela, mods e
 // teclado na proxima leitura deles).
 namespace st = wotm::settings;
-enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, kTabs };
-constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS"};
+enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabLegacy, kTabs };
+constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "LEGACY"};
 constexpr int kMaxOpts = 9;
 struct Opt { st::Key key; const char *label; const char *hint; };
 struct TabDef { int n; Opt opt[kMaxOpts]; };
@@ -153,6 +154,7 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Prompts, "BUTTON ICONS", "AUTO SHOWS THE BUTTONS OF WHATEVER YOU PLAYED WITH LAST"},
       {st::MenuConfirm, "MENU CONFIRM", "WHICH GAMEPAD BUTTON ACCEPTS IN THE MENUS"},
       {st::Vibration, "VIBRATION", "THE GAMEPAD SHAKES WITH HITS AND CRASHES. XINPUT GAMEPADS ONLY"}}},   // e o mapa: ctlRows
+    {0, {}},   // LEGACY: linhas proprias (wotm_legacy.hpp)
 };
 static int g_tab = TabVideo;
 static int g_optSel[kTabs] = {};
@@ -348,6 +350,7 @@ static bool trainStep(int r, int dir, bool wrap)
 static int tabRows(int tab)
 {
     int r[kMaxCtlRows];
+    if (tab == TabLegacy) return wotm::legacy::kRowCount;
     return tab == TabControls ? ctlRows(g_bindMap < 0, r) : kTabDefs[tab].n;
 }
 static std::string bindValue(int b, int map)
@@ -778,6 +781,15 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         controlsInput(rdram, ctx, runtime, e);
         return false;
     }
+    if (g_tab == TabLegacy)
+    {
+        if (e[POk] && sel == wotm::legacy::kRunRow && wotm::legacy::installed() && g_where == InMenu)
+        {
+            panelSfx(rdram, ctx, runtime, 8);
+            wotm::legacy::launch();
+        }
+        return false;
+    }
     if (e[PLeft] || e[PRight] || e[POk])
     {
         const st::Key k = t.opt[sel].key;
@@ -1158,6 +1170,20 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             }
         }
     }
+    // WOTM_LEGACY_TEST=1 abre a aba LEGACY; =2 tambem aciona o lancamento, uma vez (tools/linux/scenarios.py)
+    static const char *legacyTest = std::getenv("WOTM_LEGACY_TEST");
+    static bool legacyTested = false;
+    if (cur == 1 && legacyTest && !legacyTested)
+    {
+        legacyTested = true;
+        g_where = InMenu;
+        g_tab = TabLegacy;
+        g_optSel[TabLegacy] = wotm::legacy::kRunRow;
+        openPanel();
+        std::fprintf(stderr, "[legacy] aba aberta, motor original %s, commit %s\n", wotm::legacy::installed() ? "pronto" : "nao construido", WOTM_LEGACY_COMMIT);
+        if (legacyTest[0] == '2' && wotm::legacy::installed())
+            wotm::legacy::launch();
+    }
     if (cur == 1 && (g_open || g_suppress > 0))
     {
         // painel aberto: o jogo nao ve nada (a entrada do painel vem dos dispositivos); fechado ha pouco, o triangulo que fechou
@@ -1388,8 +1414,8 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     DrawRectangleRounded(Rectangle{4.f, 4.f, W - 8.f, H - 8.f}, 0.06f, 12, Color{0, 0, 0, 175});
 
     // abas: L1  VIDEO  FEATURES  CAMERA  CONTROLS  R1
-    const float tabY = lineH * 0.7f, tabH = 50.f;
-    const float tabX[kTabs] = {W * 0.22f, W * 0.40f, W * 0.59f, W * 0.78f};
+    const float tabY = lineH * 0.7f, tabH = 42.f;
+    const float tabX[kTabs] = {W * 0.164f, W * 0.31f, W * 0.48f, W * 0.647f, W * 0.816f};
     if (v.training || v.moves)   // treino: so o titulo
         label(q, ram, tex0, v.moves ? "MOVE LIST" : "TRAINING OPTIONS", W * 0.5f, tabY, tabH, kLit, kPW, kPH);
     for (int t = 0; t < kTabs && !v.training && !v.moves; ++t)
@@ -1419,7 +1445,7 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     DrawRectangleRec(Rectangle{W * 0.04f, lineH * 1.4f, W * 0.92f, 3.f}, Color{90, 80, 66, 120});
 
     // linhas da aba: nome, valor, dica e se o valor tem setas (escolha na lista)
-    enum { KOpt, KDevice, KReset, KBind, KCapture };
+    enum { KOpt, KDevice, KReset, KBind, KCapture, KInfo, KRun };
     // mdir/mbtn/mtail: linha da MOVE LIST: direcao (teclado numerico) e botoes do comando saem como icones, mtail e o texto depois deles
     struct PRow { std::string label, value; const char *hint; bool arrows; int kind; int bind = -1; bool locked = false; int8_t mdir = 0; uint8_t mbtn = 0; std::string mtail; };
     PRow rows[kMaxCtlRows];
@@ -1464,6 +1490,17 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         for (int i = 0; i < kTrainRows; ++i)
             rows[n++] = i == TrClear ? PRow{kTrainDefs[i].label, "", kTrainDefs[i].hint, false, KReset}
                                      : PRow{kTrainDefs[i].label, trainValue(i), kTrainDefs[i].hint, true, KOpt};
+    else if (tab == TabLegacy)
+    {
+        for (const wotm::legacy::Row &lr : wotm::legacy::kRows)
+            rows[n++] = PRow{lr.label, lr.value, lr.hint, false, KInfo};
+        const bool ready = wotm::legacy::installed() && !inPause;
+        rows[n++] = PRow{"RUN IT", ready ? "READY" : "NOT BUILT",
+                         inPause ? "CAN ONLY BE STARTED FROM THE MAIN MENU"
+                         : ready ? "CLOSES THIS GAME AND STARTS OUR ORIGINAL ENGINE. IT USES THE SAME DISC"
+                                 : "BUILD IT FIRST WITH THE BUILD LEGACY SCRIPT IN TOOLS, LINUX",
+                         false, ready ? int(KRun) : int(KInfo)};
+    }
     else if (tab != TabControls)
         for (int i = 0; i < t.n; ++i) rows[n++] = optRow(t.opt[i]);
     else
@@ -1635,6 +1672,10 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, v.bindMap < 0 ? "NEW KEY" : "NEW BUTTON"}, {clear, {}, "CLEAR"}, {back, {}, "BACK"}}, la, bar);
     else if (kind == KReset)
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, "RESTORE"}, {back, {}, "BACK"}}, la, bar);
+    else if (kind == KRun)
+        wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, "RUN"}, {back, {}, "BACK"}}, la, bar);
+    else if (kind == KInfo)
+        wotm_legend::post({{tabs1, tabs2, "TABS"}, {back, {}, "BACK"}}, la, bar);
     else if (v.opt >= 0 && v.opt < n && rows[v.opt].locked)
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {back, {}, "BACK"}}, la, bar);
     else if (v.tab == TabVideo)
@@ -1840,7 +1881,7 @@ static void panelHit(float u, float w, const View &v, Hover &hv)
     const float W = float(kPW), H = float(kPH), lineH = H / 8.9f, X = u * W, Y = w * H;
     if (!v.training && !v.moves && std::fabs(Y - lineH * 0.7f) < lineH * 0.5f)
     {
-        const float tabX[kTabs] = {W * 0.22f, W * 0.40f, W * 0.59f, W * 0.78f};
+        const float tabX[kTabs] = {W * 0.164f, W * 0.31f, W * 0.48f, W * 0.647f, W * 0.816f};
         if (X < W * 0.14f) hv.part = HPrevTab;
         else if (X > W * 0.86f) hv.part = HNextTab;
         else
