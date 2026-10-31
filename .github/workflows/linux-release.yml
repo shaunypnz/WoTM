@@ -1,7 +1,7 @@
 name: Linux release
 
-# A vX-linux tag publishes a release page with .github/release-notes.md. Source only: GitHub adds the source archives, and the
-# game must be built from the player's own disc, so no binary is ever attached here.
+# A vX-linux tag publishes a release page with .github/release-notes.md and the launcher script. GitHub adds the source archives, and
+# the game must be built from the player's own disc, so no game binary is ever attached here.
 
 on:
   push:
@@ -23,4 +23,4 @@ jobs:
         run: |
           sed "s/{{TAG}}/$TAG/g" .github/release-notes.md > notes.md
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --verify-tag --latest --title "War of the Monsters Recompiled for Linux $TAG" --notes-file notes.md
+            gh release create "$TAG" --verify-tag --latest --title "War of the Monsters Recompiled for Linux $TAG" --notes-file notes.md tools/linux/wotm-launcher.sh

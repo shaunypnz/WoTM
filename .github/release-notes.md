@@ -2,19 +2,24 @@ Linux preview of [War of the Monsters Recompiled](https://github.com/yanm1103/Wa
 
 **Early release:** see "Not verified yet" below.
 
-**This is source only.** You build it on your own machine from your own US disc image (SCUS-97197). No game data or game code is included or downloaded.
+**You build it from your own disc.** No game data or game code is included or downloaded. You need a US disc image (SCUS-97197), an x86-64 CPU with AVX2, and about 10 GB free.
 
 ## Install
+Download `wotm-launcher.sh` and run it in a terminal, on Ubuntu 24.04 or newer, Debian 13 or newer, or a Steam Deck in Desktop Mode:
 ```
-git clone --branch {{TAG}} https://github.com/shaunypnz/WoTM.git
-cd WoTM
-tools/linux/build.sh --iso /path/to/your.iso --dir ~/Games/WotM
-~/Games/WotM/play.sh
+curl -fLO https://github.com/shaunypnz/WoTM/releases/latest/download/wotm-launcher.sh
+bash wotm-launcher.sh
 ```
-You need Linux on x86-64 and a CPU with AVX2, plus git, Python 3, CMake 3.24+, Ninja, g++, pkg-config, and the FFmpeg and X11/GL development packages. The Ubuntu install command is at the top of `tools/linux/build.sh`. The first build compiles the whole translated game and takes a while.
+It works out which system you're on and asks for your disc image. On Ubuntu and Debian it installs the build tools with apt, which asks for your password. On a Deck it builds in a throwaway Ubuntu container, so SteamOS isn't changed, and adds the game to Steam. Then it builds into `~/Games/WotM` and adds an icon. The first build takes a while; keep a Deck plugged in.
 
-## Steam Deck
-Not yet tried on a real Deck. In Desktop Mode, in Konsole, clone as above without building, then run `tools/linux/steamdeck.sh --iso /path/to/your.iso`. It builds in a throwaway container and adds the game to Steam. Expect a long build, and please report how it goes.
+## Updates
+Start the game from its icon. When there's a new release, it asks whether to update and rebuilds from the new source; a small update takes minutes. If an update fails, your installed game stays as it was. Steam's Game Mode skips the check, so update from Desktop Mode. Updates aren't signed: they come over HTTPS from this repository, and you say yes to each one. `--no-update` skips the check, and `--update` updates straight away.
+
+## LEGACY tab
+The launcher also builds our original engine, so Recompiled Options > LEGACY can start it. `--no-legacy` skips that. It needs a Vulkan driver, and its first run is slower because it hasn't recorded the game's vector programs yet.
+
+## Build by hand
+`tools/linux/build.sh --iso /path/to/your.iso --dir ~/Games/WotM`, then `~/Games/WotM/play.sh`. The packages it needs are listed at the top of the script.
 
 ## What works
 - Native Linux build and installer from your own disc
@@ -24,7 +29,7 @@ Not yet tried on a real Deck. In Desktop Mode, in Konsole, clone as above withou
 - FXAA and sharpening filters, off by default (`WOTM_FXAA=1`, `WOTM_SHARPEN=0.5`)
 
 ## Not verified yet
-Frame rate hasn't been measured. Adventure mode, saves and long sessions are untested on Linux, and only one machine has been tried. Rumble isn't implemented on Linux.
+Frame rate hasn't been measured. Adventure mode, saves and long sessions are untested on Linux, and only one machine has been tried. Rumble isn't implemented on Linux. The installer has run on a clean Ubuntu 24.04, but the Deck's container route hasn't run on a real Deck.
 
 The game draws with OpenGL. A Vulkan renderer is in progress and isn't in this release.
 

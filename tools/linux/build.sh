@@ -36,20 +36,27 @@ fi
 
 echo "== PS2Recomp"
 mkdir -p "$RT"
-if [ ! -d "$PR/.git" ]; then
-  git clone -q https://github.com/ran-j/PS2Recomp.git "$PR"
-  git -c advice.detachedHead=false -C "$PR" checkout -q "$PS2RECOMP_COMMIT"
+[ -d "$PR/.git" ] || git clone -q https://github.com/ran-j/PS2Recomp.git "$PR"
+# A release can change the patches: an update starts again from the clean base instead of patching on top of the old ones
+PATCHES="$PS2RECOMP_COMMIT $(cat "$REPO"/tools/runtime_patch/wotm-runtime.patch "$REPO"/tools/runtime_patch/ps2recomp-fpu-sqrt.patch | sha1sum | cut -d' ' -f1)"
+if [ "$(cat "$PR/.wotm-patches" 2>/dev/null)" != "$PATCHES" ]; then
+  git -C "$PR" cat-file -e "$PS2RECOMP_COMMIT" 2>/dev/null || git -C "$PR" fetch -q origin
+  git -C "$PR" checkout -q -f "$PS2RECOMP_COMMIT"
+  git -C "$PR" clean -fdq
+  for p in wotm-runtime.patch ps2recomp-fpu-sqrt.patch; do
+    git -C "$PR" apply --whitespace=nowarn "$REPO/tools/runtime_patch/$p" || { echo "$p does not apply to $PR" >&2; exit 1; }
+  done
+  echo "$PATCHES" > "$PR/.wotm-patches"
 fi
-for p in wotm-runtime.patch ps2recomp-fpu-sqrt.patch; do
-  if git -C "$PR" apply --whitespace=nowarn --reverse --check "$REPO/tools/runtime_patch/$p" 2>/dev/null; then continue; fi
-  git -C "$PR" apply --whitespace=nowarn "$REPO/tools/runtime_patch/$p" || { echo "$p does not apply to $PR" >&2; exit 1; }
-done
 
 echo "== game executable"
 mkdir -p "$WORK" "$RETAIL"
 python3 -I "$REPO/tools/linux/iso_extract.py" "$ISO" SCUS_971.97 "$WORK/game.elf"
 [ "$(sha1sum "$WORK/game.elf" | cut -d' ' -f1)" = "$ELF_SHA1" ] || { echo "this port only supports the NTSC-U disc (SCUS-97197)" >&2; exit 1; }
 
+# The translated game is kept across updates, unless the release changed the translator itself
+TRANSLATOR="$PS2RECOMP_COMMIT $(git -C "$PR" diff HEAD -- ps2xRecomp ps2xAnalyzer | sha1sum | cut -d' ' -f1)"
+[ "$(cat "$RETAIL/.translator" 2>/dev/null)" = "$TRANSLATOR" ] || rm -f "$RETAIL/register_functions.cpp"
 if [ ! -f "$RETAIL/register_functions.cpp" ]; then
   echo "== translating the game"
   cmake -S "$PR" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -B "$RT/build_tools"
@@ -58,12 +65,13 @@ if [ ! -f "$RETAIL/register_functions.cpp" ]; then
     "$RT/build_tools/ps2xAnalyzer/ps2_analyzer" game.elf config.toml >/dev/null
     sed -i 's#^output = .*#output = "../retail/"#' config.toml
     "$RT/build_tools/ps2xRecomp/ps2_recomp" config.toml >/dev/null )
+  echo "$TRANSLATOR" > "$RETAIL/.translator"
 fi
 
 echo "== build (the translated game takes a while)"
 B=$RT/build_dev; mkdir -p "$B/wotm_gen"
 # VU0 microprograms in C++, generated from the ELF: game code, so it stays in the build folder. Must exist before the first compile
-[ -f "$B/wotm_gen/wotm_vu0_native.gen.inc" ] || python3 "$REPO/tools/vu0native.py" "$WORK/game.elf" "$B/wotm_gen/wotm_vu0_native.gen.inc" >/dev/null
+[ "$B/wotm_gen/wotm_vu0_native.gen.inc" -nt "$REPO/tools/vu0native.py" ] || python3 "$REPO/tools/vu0native.py" "$WORK/game.elf" "$B/wotm_gen/wotm_vu0_native.gen.inc" >/dev/null
 VER="#define WOTM_VERSION \"$(git -C "$REPO" describe --tags --always --dirty 2>/dev/null || echo dev)\""
 [ "$(cat "$B/wotm_gen/wotm_version.gen.h" 2>/dev/null)" = "$VER" ] || echo "$VER" > "$B/wotm_gen/wotm_version.gen.h"
 # The LEGACY tab of the options panel names the last change to legacy/, so it follows the repository on its own
@@ -85,6 +93,7 @@ cat > "$DIR/play.sh" <<PLAY
 #!/bin/sh
 # Starts the game; settings, saves and wotm.log stay in this folder. Pass KEY=VALUE options through the environment.
 cd "\$(dirname "\$0")"
+[ -d lib ] && export LD_LIBRARY_PATH="\$PWD/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 export PS2X_CD_IMAGE="\${PS2X_CD_IMAGE:-$ISO}"
 [ -f wotm.log ] && mv -f wotm.log wotm.prev.log
 exec ./wotm "\$@" > wotm.log 2>&1

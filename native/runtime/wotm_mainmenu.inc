@@ -1498,7 +1498,7 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         rows[n++] = PRow{"RUN IT", ready ? "READY" : "NOT BUILT",
                          inPause ? "CAN ONLY BE STARTED FROM THE MAIN MENU"
                          : ready ? "CLOSES THIS GAME AND STARTS OUR ORIGINAL ENGINE. IT USES THE SAME DISC"
-                                 : "BUILD IT FIRST WITH THE BUILD LEGACY SCRIPT IN TOOLS, LINUX",
+                                 : "NOT INSTALLED. THE LAUNCHER BUILDS IT, UNLESS IT WAS RUN WITH NO LEGACY",
                          false, ready ? int(KRun) : int(KInfo)};
     }
     else if (tab != TabControls)

@@ -13,7 +13,7 @@ A native port of **War of the Monsters** (PS2, 2003), built from the statically 
 **Where this fork came from:** we were separately building our own Linux port of the game. When we found this project, it was further along, so we moved our work here. That original engine and its history are in [`legacy/`](legacy/README.md).
 
 ## Play
-1. Build it from your own disc: `tools/linux/build.sh --iso <your.iso> --dir ~/Games/WotM`
+1. Download `wotm-launcher.sh` from the [latest release](https://github.com/shaunypnz/WoTM/releases/latest) and run it with `bash wotm-launcher.sh`. It detects Ubuntu, Debian or a Steam Deck, installs what the build needs, and builds from your own disc
 2. Run `~/Games/WotM/play.sh`
 
 The game starts in a 1280x720 window (F11 for fullscreen). Ctrl+Q closes it. If RustDesk runs on the machine, the mouse isn't captured for the camera, so a remote session keeps its pointer; F10 toggles that.
@@ -32,11 +32,11 @@ To make your own mods, check the reference: [docs/guides/MODS.md](docs/guides/MO
 Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [docs/ANALYSIS.md](docs/ANALYSIS.md). File formats: [docs/FORMATS.md](docs/FORMATS.md).
 
 ## Building the port (Linux)
-`tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` builds from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work.
+`tools/linux/wotm-launcher.sh` installs the build tools, builds, adds an icon, and offers new releases each time it starts. To do it by hand, `tools/linux/build.sh --iso <your.iso> [--dir ~/Games/WotM]` builds from your own ISO and writes a game folder with `play.sh`. The packages it needs are listed at the top of the script. Rumble is not implemented on Linux yet; first-run and options work.
 
-**Our original engine:** the LEGACY tab in RECOMPILED OPTIONS shows the port we built first, on a separate recompiler. Build it with `tools/linux/build_legacy.sh --iso <your.iso> --dir <game folder>` (needs clang 17+ and SDL2) and the tab can start it.
+**Our original engine:** the LEGACY tab in RECOMPILED OPTIONS shows the port we built first, on a separate recompiler. The launcher builds it; by hand, use `tools/linux/build_legacy.sh --iso <your.iso> --dir <game folder>` (needs clang 17+ and SDL2) and the tab can start it.
 
-**Steam Deck (not yet tried on a real Deck):** in Desktop Mode, in Konsole, clone this repo and run `tools/linux/steamdeck.sh --iso <your.iso>`. It builds inside a throwaway Ubuntu container, so nothing is installed on SteamOS, then adds the game to Steam. Use the overlay to quit in Game Mode. The build takes a long time, so keep the Deck plugged in.
+**Steam Deck (not yet tried on a real Deck):** in Desktop Mode, run the launcher in Konsole. It builds inside a throwaway Ubuntu container, so nothing is installed on SteamOS, then adds the game to Steam. Use the overlay to quit in Game Mode. Updates are offered in Desktop Mode only. The build takes a long time, so keep the Deck plugged in.
 
 To test a build, `tools/linux/scenarios.py --game <folder>` runs bot-only scenarios in private windows and fails on a crash, an early exit, or a blank or frozen picture (`--list` shows them). `--spectate` lets you watch the bots on your own screen.
 
