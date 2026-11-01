@@ -2,8 +2,9 @@
 # ABOUTME: One file installer, updater and launcher for Linux. Detects Ubuntu/Debian or Steam Deck, installs what the build needs,
 # ABOUTME: builds the game from your own disc, adds icons, and on each start offers new releases. No game data is ever downloaded.
 #
-# Usage: wotm-launcher.sh [--iso FILE] [--dir ~/Games/WotM] [--no-legacy] [--yes] [--update] [--no-update] [--jobs N] [--detect]
+# Usage: wotm-launcher.sh [--iso FILE] [--dir FOLDER] [--no-legacy] [--yes] [--update] [--no-update] [--jobs N] [--detect]
 #   First run: installs. Later runs: offer an update if there is one, then play. A failed update keeps the installed game.
+#   The game goes in the folder this script is in, unless --dir says otherwise.
 set -euo pipefail
 REPO_URL=${WOTM_REPO_URL:-https://github.com/shaunypnz/WoTM}
 OS_RELEASE=${WOTM_OS_RELEASE:-/etc/os-release}
@@ -25,11 +26,11 @@ while [ $# -gt 0 ]; do
     --no-update) NO_UPDATE=1; shift ;;
     --detect) ACTION=detect; shift ;;
     --inner-build) ACTION=inner; INNER_TAG=$2; shift 2 ;;   # the build itself, on this system or inside the container
-    -h|--help) sed -n '5,6p' "$SELF" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '5,7p' "$SELF" | cut -c3-; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
-DIR=${DIR:-$HOME/Games/WotM}; DIR=$(realpath -m "$DIR")
+DIR=${DIR:-$(dirname "$SELF")}; DIR=$(realpath -m "$DIR")
 CONF=$DIR/launcher.conf; LOG=$DIR/install.log; SRC=$DIR/src
 [ -f "$CONF" ] && . "$CONF"   # VERSION, SAVED_ISO, SAVED_LEGACY, SKIP_TAG: written only by this script
 LEGACY=${LEGACY:-${SAVED_LEGACY:-1}}; ISO=${ISO:-${SAVED_ISO:-}}
@@ -251,6 +252,7 @@ esac
 
 if [ ! -x "$DIR/wotm" ]; then
   say "War of the Monsters Recompiled installer: $(os_name "$OS")"
+  say "Installing in $DIR"
   preflight
   TAG=$(latest_tag 15); [ -n "$TAG" ] || die "Couldn't reach $REPO_URL to find the latest release."
   pick_iso

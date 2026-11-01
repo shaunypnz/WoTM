@@ -13,8 +13,8 @@ A native port of **War of the Monsters** (PS2, 2003), built from the statically 
 **Where this fork came from:** we were separately building our own Linux port of the game. When we found this project, it was further along, so we moved our work here. That original engine and its history are in [`legacy/`](legacy/README.md).
 
 ## Play
-1. Download `wotm-launcher.sh` from the [latest release](https://github.com/shaunypnz/WoTM/releases/latest) and run it with `bash wotm-launcher.sh`. It detects Ubuntu, Debian or a Steam Deck, installs what the build needs, and builds from your own disc
-2. Run `~/Games/WotM/play.sh`
+1. Download `wotm-launcher.sh` from the [latest release](https://github.com/shaunypnz/WoTM/releases/latest) into the folder where you want the game and run it there with `bash wotm-launcher.sh`. It detects Ubuntu, Debian or a Steam Deck, installs what the build needs, and builds from your own disc
+2. Run `./play.sh` in that folder
 
 The game starts in a 1280x720 window (F11 for fullscreen). Ctrl+Q closes it. If RustDesk runs on the machine, the mouse isn't captured for the camera, so a remote session keeps its pointer; F10 toggles that.
 

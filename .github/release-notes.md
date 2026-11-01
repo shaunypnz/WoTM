@@ -5,12 +5,12 @@ Linux preview of [War of the Monsters Recompiled](https://github.com/yanm1103/Wa
 **You build it from your own disc.** No game data or game code is included or downloaded. You need a US disc image (SCUS-97197), an x86-64 CPU with AVX2, and about 10 GB free.
 
 ## Install
-Download `wotm-launcher.sh` and run it in a terminal, on Ubuntu 24.04 or newer, Debian 13 or newer, or a Steam Deck in Desktop Mode:
+Download `wotm-launcher.sh` into the folder where you want the game and run it there in a terminal, on Ubuntu 24.04 or newer, Debian 13 or newer, or a Steam Deck in Desktop Mode:
 ```
 curl -fLO https://github.com/shaunypnz/WoTM/releases/latest/download/wotm-launcher.sh
 bash wotm-launcher.sh
 ```
-It works out which system you're on and asks for your disc image. On Ubuntu and Debian it installs the build tools with apt, which asks for your password. On a Deck it builds in a throwaway Ubuntu container, so SteamOS isn't changed, and adds the game to Steam. Then it builds into `~/Games/WotM` and adds an icon. The first build takes a while; keep a Deck plugged in.
+It works out which system you're on and asks for your disc image. On Ubuntu and Debian it installs the build tools with apt, which asks for your password. On a Deck it builds in a throwaway Ubuntu container, so SteamOS isn't changed, and adds the game to Steam. Then it builds in that folder and adds an icon. The first build takes a while; keep a Deck plugged in.
 
 ## Updates
 Start the game from its icon. When there's a new release, it asks whether to update and rebuilds from the new source; a small update takes minutes. If an update fails, your installed game stays as it was. Steam's Game Mode skips the check, so update from Desktop Mode. Updates aren't signed: they come over HTTPS from this repository, and you say yes to each one. `--no-update` skips the check, and `--update` updates straight away.
