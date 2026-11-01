@@ -52,12 +52,18 @@ ask() {   # ask "question": yes by default, and --yes answers it
   if command -v zenity >/dev/null; then zenity --question --title="War of the Monsters" --text="$1" 2>/dev/null
   else kdialog --title "War of the Monsters" --yesno "$1" 2>/dev/null; fi
 }
+typed_path() {   # what the prompt got as a shell would read it: tab completion leaves backslashes, and dragging a file in leaves quotes
+  local p
+  p=$(printf '%s' "$1" | sed -E "s/^[[:space:]]+//; s/[[:space:]]+\$//; s/^'(.*)'\$/\1/; s/^\"(.*)\"\$/\1/")
+  [ -e "$p" ] || p=$(printf '%s' "$p" | sed -E 's/\\(.)/\1/g')
+  printf '%s' "${p/#\~/$HOME}"
+}
 pick_iso() {
   if [ -f "$ISO" ]; then ISO=$(realpath "$ISO"); return 0; fi
-  if [ -t 0 ]; then read -r -e -p "Path to your War of the Monsters US disc image (.iso): " ISO; ISO=${ISO/#\~/$HOME}
+  if [ -t 0 ]; then read -r -e -p "Path to your War of the Monsters US disc image (.iso): " ISO; ISO=$(typed_path "$ISO")
   elif command -v zenity >/dev/null && has_gui; then ISO=$(zenity --file-selection --title="Your War of the Monsters US disc image (.iso)" --file-filter="*.iso *.ISO" 2>/dev/null || true)
   elif command -v kdialog >/dev/null && has_gui; then ISO=$(kdialog --getopenfilename "$HOME" "*.iso *.ISO" 2>/dev/null || true); fi
-  [ -f "$ISO" ] || die "A disc image is needed: pass --iso <file.iso>. No game data is included or downloaded."
+  [ -f "$ISO" ] || die "No disc image at '$ISO'. A disc image is needed: pass --iso <file.iso>. No game data is included or downloaded."
   ISO=$(realpath "$ISO")
 }
 os_value() { sed -n "s/^$1=//p" "$OS_RELEASE" 2>/dev/null | head -1 | tr -d '"'; }
