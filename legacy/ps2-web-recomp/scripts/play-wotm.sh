@@ -169,7 +169,8 @@ prepare() {
     # shellcheck disable=SC2086
     cmake -S "$src" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${cxx_flags[@]}" -DPS2_GENERATED="$generated" ${PS2_CMAKE_ARGS:-} > /dev/null
   fi
-  ninja -C "$build" ${jobs:+-j "$jobs"} ps2run > "$build/ninja.log" 2>&1 || { tail -30 "$build/ninja.log"; exit 1; }
+  ninja -C "$build" ${jobs:+-j "$jobs"} ps2run 2>&1 | tee "$build/ninja.log"
+  [ "${PIPESTATUS[0]}" = 0 ] || exit 1
   echo "ready: $build/ps2run"
 
   # The game folder carries its own launchers, so it plays without the source tree.

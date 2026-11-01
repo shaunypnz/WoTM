@@ -36,7 +36,7 @@ fi
 
 echo "== PS2Recomp"
 mkdir -p "$RT"
-[ -d "$PR/.git" ] || git clone -q https://github.com/ran-j/PS2Recomp.git "$PR"
+[ -d "$PR/.git" ] || git clone https://github.com/ran-j/PS2Recomp.git "$PR"
 # A release can change the patches: an update starts again from the clean base instead of patching on top of the old ones
 PATCHES="$PS2RECOMP_COMMIT $(cat "$REPO"/tools/runtime_patch/wotm-runtime.patch "$REPO"/tools/runtime_patch/ps2recomp-fpu-sqrt.patch | sha1sum | cut -d' ' -f1)"
 if [ "$(cat "$PR/.wotm-patches" 2>/dev/null)" != "$PATCHES" ]; then
@@ -62,8 +62,10 @@ if [ ! -f "$RETAIL/register_functions.cpp" ]; then
   cmake -S "$PR" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -B "$RT/build_tools"
   cmake --build "$RT/build_tools" -j "$JOBS"
   ( cd "$WORK"
+    echo "analysing the executable (quiet, can take minutes)"
     "$RT/build_tools/ps2xAnalyzer/ps2_analyzer" game.elf config.toml >/dev/null
     sed -i 's#^output = .*#output = "../retail/"#' config.toml
+    echo "writing the C++ (quiet, can take minutes)"
     "$RT/build_tools/ps2xRecomp/ps2_recomp" config.toml >/dev/null )
   echo "$TRANSLATOR" > "$RETAIL/.translator"
 fi

@@ -115,7 +115,7 @@ install_packages() {
   for p in $want; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed' || missing="$missing $p"; done
   [ -n "$missing" ] || return 0
   say "== installing build tools:$missing"
-  as_root env DEBIAN_FRONTEND=noninteractive sh -c "apt-get ${APT_OPTS:-} update -qq && apt-get ${APT_OPTS:-} install -y -qq --no-install-recommends $missing"
+  as_root env DEBIAN_FRONTEND=noninteractive sh -c "apt-get ${APT_OPTS:-} update && apt-get ${APT_OPTS:-} install -y --no-install-recommends $missing"
 }
 check_apt_versions() {   # older releases can't build this: say so before asking for a password
   local gxx cm
@@ -139,7 +139,7 @@ bundle_libs() {   # the container's libraries the host may lack. Graphics, sound
 fetch_source() {
   if [ ! -d "$SRC/.git" ]; then
     say "== source $1"
-    git clone -q --filter=blob:none "$REPO_URL" "$SRC"
+    git clone --filter=blob:none "$REPO_URL" "$SRC"
   fi
   [ -z "${WOTM_IN_CONTAINER:-}" ] || git config --global --add safe.directory '*'
   git -C "$SRC" fetch -q --force --tags origin
@@ -153,6 +153,7 @@ inner_build() {
   [ -n "${WOTM_IN_CONTAINER:-}" ] && bundle_libs "$DIR/wotm" "$DIR/lib"
   if [ "$LEGACY" = 1 ]; then
     # The original engine only fills the LEGACY tab: the game stays good if it fails
+    say "== LEGACY engine"
     if bash "$SRC/tools/linux/build_legacy.sh" --iso "$ISO" --dir "$DIR" --jobs "$JOBS"; then
       [ -n "${WOTM_IN_CONTAINER:-}" ] && bundle_libs "$DIR/legacy/pc/build/ps2run" "$DIR/legacy/lib"
       say "LEGACY: original engine built"
@@ -208,9 +209,32 @@ DESK
 save_conf() {
   { printf 'VERSION=%q\nSAVED_ISO=%q\nSAVED_LEGACY=%q\nSKIP_TAG=%q\n' "$1" "$ISO" "$LEGACY" "${SKIP_TAG:-}"; } > "$CONF"
 }
+with_percent() {   # every build line, led by the share of the whole install: each stage owns a range, and ninja's [n/m] moves through it
+  local line pct=0 from=0 to=0 now legacy=$([ "$LEGACY" = 1 ] && echo 60 || echo 96)
+  while IFS= read -r line; do
+    case "$line" in
+      "The LEGACY tab will stay unbuilt."*) legacy=96 ;;
+      "== installing build tools"*) from=0; to=3 ;;
+      "== source "*) from=3; to=5 ;;
+      "== PS2Recomp"*) from=5; to=7 ;;
+      "== game executable"*) from=7; to=8 ;;
+      "== translating"*) from=8; to=18 ;;
+      "== build (the translated"*) from=18; to=$legacy ;;
+      "== game folder"*) from=$legacy; to=$((legacy + 1)) ;;
+      "== LEGACY"*) from=$((legacy + 1)); to=$((legacy + 3)) ;;
+      "== machine code"*) from=$((legacy + 3)); to=$((legacy + 10)) ;;
+      "== build ("*) from=$((legacy + 10)); to=99 ;;
+    esac
+    now=$from
+    if [[ $line =~ ^\[([0-9]+)/([0-9]+)\] ]] && [ "${BASH_REMATCH[2]}" -gt 0 ]; then now=$((from + (to - from) * BASH_REMATCH[1] / BASH_REMATCH[2])); fi
+    [ "$now" -le "$pct" ] || pct=$now
+    printf '[%3d%%] %s\n' "$pct" "$line"
+  done
+}
 show_progress() {   # started from an icon there is no terminal, and a silent build would look like a hang
   if [ ! -t 1 ] && has_gui && command -v zenity >/dev/null; then
-    sed -u 's/^/# /' | zenity --progress --pulsate --auto-close --no-cancel --title="War of the Monsters" --text="Building the game. This takes a while." 2>/dev/null || cat >/dev/null
+    { while IFS= read -r line; do p=${line#[}; p=${p%%%*}; printf '%d\n# %s\n' "$p" "$line"; done; echo 100; } | \
+      zenity --progress --auto-close --no-cancel --no-markup --title="War of the Monsters" --text="Building the game. This takes a while." 2>/dev/null || cat >/dev/null
   else
     cat
   fi
@@ -226,7 +250,7 @@ build_tag() {   # builds a release and moves this install to it; on failure the 
       apt) check_apt_versions && install_packages && "$BASH" "$SELF" --inner-build "$tag" --iso "$ISO" --dir "$DIR" --jobs "$JOBS" $([ "$LEGACY" = 1 ] || echo --no-legacy) ;;
       *) build_in_container "$tag" ;;
     esac
-  } > >(tee "$LOG" | grep --line-buffered -E '^(== |Done|LEGACY:|Added|error|.*too old)' | show_progress) 2>&1 || rc=$?
+  } > >(tee "$LOG" | with_percent | show_progress) 2>&1 || rc=$?
   wait 2>/dev/null || true
   [ "$rc" = 0 ] || return "$rc"
   # The launcher of the release just built replaces this one, so the launcher updates with the game
